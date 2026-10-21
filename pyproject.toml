@@ -25,7 +25,7 @@ classifiers = [
 requires-python=">=3.10,<4.0"
 dependencies=[
     "unitelabs-cdk~=0.16",
-    "unitelabs-bus[usb]~=0.8",
+    "unitelabs-bus[serial]~=0.8",
 ]
 
 [project.urls]
