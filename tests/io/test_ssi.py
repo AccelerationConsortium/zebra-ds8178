@@ -14,6 +14,7 @@ from unitelabs.zebra_ds8178.io.ssi import (
     Symbology,
     encode_param_number,
     encode_param_send,
+    join_message,
     parse_decode_data,
     parse_event,
     parse_nak_cause,
@@ -198,3 +199,19 @@ def test_rejects_empty_payloads(parse) -> None:
     """Packets missing their one required byte are rejected."""
     with pytest.raises(UnexpectedResponseError):
         parse(b"")
+
+
+@pytest.mark.parametrize(
+    ("opcode", "parts", "joined"),
+    [
+        (Opcode.DECODE_DATA, [b"\x1bAB", b"\x1bCD"], b"\x1bABCD"),
+        (Opcode.PARAM_SEND, [b"\xff\x01\x00", b"\xff\x02\x01"], b"\xff\x01\x00\x02\x01"),
+        (Opcode.SSI_MGMT_COMMAND, [b"\x00\x01", b"\x02\x03"], b"\x00\x01\x02\x03"),
+    ],
+)
+def test_joins_multipacket_messages(opcode, parts, joined) -> None:
+    """The byte DECODE_DATA and PARAM_SEND repeat per packet is kept once; other messages are concatenated."""
+    packets = [Packet(opcode, part, source=Source.DECODER, status=Status.CONTINUATION) for part in parts[:-1]]
+    packets.append(Packet(opcode, parts[-1], source=Source.DECODER))
+
+    assert join_message(packets) == Packet(opcode, joined, source=Source.DECODER)

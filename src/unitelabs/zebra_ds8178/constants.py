@@ -12,3 +12,9 @@ RETRIES = 2
 
 OPEN_TIMEOUT = 5.0
 """Seconds to wait for the serial port to open and the scanner to answer its first request."""
+
+CHARACTER_TIMEOUT = 0.5
+"""
+Seconds without a new byte after which a partly received packet is dropped; the scanner's own Host Character
+Time-out defaults to 0.2 s (Product Reference Guide p. 9-18), the rest is margin for USB scheduling.
+"""

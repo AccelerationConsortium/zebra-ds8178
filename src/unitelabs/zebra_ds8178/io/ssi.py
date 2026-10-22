@@ -5,7 +5,9 @@ Sources: SSI Programmer's Guide 72E-40451-04 ("SSI guide") and the DS8178 Produc
 This module only builds and parses bytes; sending, ACK/NAK handshaking and retries live in the protocol.
 
 Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC): framing and checksum, REQUEST_REVISION, BEEP,
-PARAM_SEND, START_DECODE and DECODE_DATA for the six Appendix F sample symbologies.
+PARAM_SEND, PARAM_REQUEST with byte values and F0/F1 parameter numbers, START_DECODE, DECODE_DATA for the six
+Appendix F sample symbologies, and a NAK RESEND answered by a resend with the retransmit bit set (the scanner NAKs
+the first request after the port opens).
 
 Known gaps, to verify on hardware:
 - The DS8178 sets bit 7 of the status byte on its replies, which the SSI guide marks as unused; it is masked off.
@@ -16,6 +18,9 @@ Known gaps, to verify on hardware:
 import dataclasses
 import enum
 
+from unitelabs.bus import Command
+
+from ..constants import RESPONSE_TIMEOUT
 from .errors import UnexpectedResponseError
 
 HEADER_LENGTH = 4
@@ -88,7 +93,7 @@ class NakCause(enum.IntEnum):
     UNKNOWN = -1
 
     @classmethod
-    def _missing_(cls, _value: object) -> "NakCause":
+    def _missing_(cls, value: object) -> "NakCause":  # noqa: ARG003
         return cls.UNKNOWN
 
 
@@ -104,7 +109,7 @@ class EventCode(enum.IntEnum):
     UNKNOWN = -1
 
     @classmethod
-    def _missing_(cls, _value: object) -> "EventCode":
+    def _missing_(cls, value: object) -> "EventCode":  # noqa: ARG003
         return cls.UNKNOWN
 
 
@@ -324,6 +329,48 @@ class Packet:
 def frame_length(length_byte: int) -> int:
     """Total bytes on the wire for a packet whose first byte is `length_byte`."""
     return length_byte + CHECKSUM_LENGTH
+
+
+def join_message(packets: list[Packet]) -> Packet:
+    """
+    Reassemble the packets of a multipacket message into one packet carrying the whole message.
+
+    DECODE_DATA repeats its bar code type and PARAM_SEND its beep code in every packet (SSI guide notes to tables 2-37
+    and 2-72), so that first byte is kept only from the first packet.
+    """
+    first, rest = packets[0], packets[1:]
+    skip = 1 if first.opcode in (Opcode.DECODE_DATA, Opcode.PARAM_SEND) else 0
+    data = first.data + b"".join(packet.data[skip:] for packet in rest)
+
+    return Packet(opcode=first.opcode, data=data, source=first.source, status=packets[-1].status)
+
+
+class SsiCommand(Command[Packet, Packet]):
+    """A request packet and the reply message it gets, which may arrive as several packets and is joined into one."""
+
+    def __init__(self, packet: Packet) -> None:
+        super().__init__(packet, timeout=RESPONSE_TIMEOUT)
+
+    def _serialize(self, message: Packet) -> bytes:
+        return message.encode()
+
+    def _validate_response(self, data: bytes) -> bool:
+        # The protocol forwards whole, checksum-verified frames; the reply is complete once the last frame is.
+        position = status = 0
+        while position < len(data):
+            status = data[position + 3]
+            position += frame_length(data[position])
+
+        return position == len(data) and not status & Status.CONTINUATION
+
+    def _deserialize(self, response: bytes) -> Packet:
+        packets, position = [], 0
+        while position < len(response):
+            end = position + frame_length(response[position])
+            packets.append(Packet.decode(response[position:end]))
+            position = end
+
+        return join_message(packets)
 
 
 @dataclasses.dataclass(frozen=True)
