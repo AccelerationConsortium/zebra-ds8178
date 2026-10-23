@@ -18,3 +18,15 @@ CHARACTER_TIMEOUT = 0.5
 Seconds without a new byte after which a partly received packet is dropped; the scanner's own Host Character
 Time-out defaults to 0.2 s (Product Reference Guide p. 9-18), the rest is margin for USB scheduling.
 """
+
+MIN_SCAN_TIMEOUT = 0.5
+"""Shortest scan, in seconds; the scanner's Decode Session Timeout starts at 0.5 s (Product Reference Guide p. 6-31)."""
+
+MAX_SCAN_TIMEOUT = 9.9
+"""
+Longest scan, in seconds: the scanner ends a decode session on its own after its Decode Session Timeout, at most
+9.9 s and 9.9 s by default (Product Reference Guide p. 6-31), so a longer wait would only outlast the session.
+"""
+
+FLUSH_TIMEOUT = 0.1
+"""Seconds to let queued writes, e.g. the ACK for the last scan, reach the scanner before the port closes."""

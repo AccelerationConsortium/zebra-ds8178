@@ -5,12 +5,15 @@ Sources: SSI Programmer's Guide 72E-40451-04 ("SSI guide") and the DS8178 Produc
 This module only builds and parses bytes; sending, ACK/NAK handshaking and retries live in the protocol.
 
 Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC): framing and checksum, REQUEST_REVISION, BEEP,
-PARAM_SEND, PARAM_REQUEST with byte values and F0/F1 parameter numbers, START_DECODE, DECODE_DATA for the six
-Appendix F sample symbologies, and a NAK RESEND answered by a resend with the retransmit bit set (the scanner NAKs
-the first request after the port opens).
+AIM_ON/AIM_OFF (the red aiming pattern), SCAN_ENABLE/SCAN_DISABLE (a disabled scanner NAKs START_DECODE as
+DENIED), STOP_DECODE, PARAM_SEND, PARAM_REQUEST with byte
+values and F0/F1 parameter numbers, START_DECODE, DECODE_DATA for the six Appendix F sample symbologies, and a NAK
+RESEND answered by a resend with the retransmit bit set (the scanner NAKs the first request after the port opens).
 
 Known gaps, to verify on hardware:
 - The DS8178 sets bit 7 of the status byte on its replies, which the SSI guide marks as unused; it is masked off.
+- LED_ON and LED_OFF are ACKed for LED bits 0 to 2 (bit 3 is DENIED) but light no LED on the DS8178 in its
+  cradle, so they are not used; the PRG's Beeper/LED attribute 6000 is the documented alternative.
 - The multipacket decode data format, string/array/multipacket parameter replies and the symbology IDs beyond the
   six sampled ones follow the SSI guide only.
 """

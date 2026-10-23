@@ -2,6 +2,7 @@
 
 import asyncio
 import collections.abc
+import datetime
 import functools
 import types
 
@@ -10,6 +11,9 @@ import pytest
 from unitelabs.bus.testing import create_mock_connection
 from unitelabs.zebra_ds8178.io import (
     CommandRejectedError,
+    NoBarcodeDecodedError,
+    ScannerBusyError,
+    ScanningDisabledError,
     ScannerNotRespondingError,
     SerialPortNotFoundError,
     UnexpectedResponseError,
@@ -17,7 +21,7 @@ from unitelabs.zebra_ds8178.io import (
 )
 from unitelabs.zebra_ds8178.io import protocol as protocol_module
 from unitelabs.zebra_ds8178.io import ssi
-from unitelabs.zebra_ds8178.io.ssi import NakCause, Opcode, Packet, Source, Status
+from unitelabs.zebra_ds8178.io.ssi import BeepCode, NakCause, Opcode, Packet, Source, Status
 
 # Captured from a DS8178: REPLY_REVISION and a decoder CMD_ACK (the scanner sets the undocumented status bit 7).
 REVISION_REPLY = bytes.fromhex(
@@ -47,6 +51,7 @@ class FakeScanner:
         self.replies = {
             Opcode.REQUEST_REVISION: [REVISION_REPLY],
             Opcode.PARAM_REQUEST: [PACKETED],
+            Opcode.SCAN_ENABLE: [ACK],
             **(replies or {}),
         }
         self.received: list[Packet] = []
@@ -96,14 +101,15 @@ async def settle() -> None:
 # - Connecting ------------------------------------------------------------------------------------------------------
 
 
-async def test_connecting_confirms_ssi_and_keeps_an_already_packeted_format() -> None:
-    """With packeted decode data already set, connecting only reads; nothing is written to non-volatile memory."""
+async def test_connecting_confirms_ssi_keeps_an_already_packeted_format_and_enables_scanning() -> None:
+    """With packeted decode data already set, nothing is written to non-volatile memory; scanning is enabled."""
     scanner = FakeScanner()
     protocol = ZebraDs8178Protocol(port="mock")
 
     await protocol._reopen(functools.partial(create_mock_connection, stubs=[scanner]), {})
 
-    assert scanner.opcodes() == [Opcode.REQUEST_REVISION, Opcode.PARAM_REQUEST]
+    assert scanner.opcodes() == [Opcode.REQUEST_REVISION, Opcode.PARAM_REQUEST, Opcode.SCAN_ENABLE]
+    assert protocol.scanning_enabled
     assert scanner.received[1].data == b"\xee"
     protocol.close()
 
@@ -117,7 +123,7 @@ async def test_connecting_switches_raw_decode_data_to_packeted_permanently() -> 
 
     await protocol._reopen(functools.partial(create_mock_connection, stubs=[scanner]), {})
 
-    assert scanner.received[-1] == Packet(Opcode.PARAM_SEND, bytes.fromhex("FF EE 01"), status=Status.PERMANENT)
+    assert scanner.received[-2] == Packet(Opcode.PARAM_SEND, bytes.fromhex("FF EE 01"), status=Status.PERMANENT)
     protocol.close()
 
 
@@ -263,6 +269,167 @@ async def test_a_closed_connection_is_not_responding(connect) -> None:
         await protocol.get_revision()
 
 
+# - Indicators and scanning state -----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("call", "packet"),
+    [
+        (lambda protocol: protocol.beep(BeepCode.SHORT_HIGH_1), Packet(Opcode.BEEP, b"\x00")),
+        (lambda protocol: protocol.beep(BeepCode.LOW_CLICK), Packet(Opcode.BEEP, b"\x1d")),
+        (lambda protocol: protocol.aim_on(), Packet(Opcode.AIM_ON)),
+        (lambda protocol: protocol.aim_off(), Packet(Opcode.AIM_OFF)),
+        (lambda protocol: protocol.scan_enable(), Packet(Opcode.SCAN_ENABLE)),
+        (lambda protocol: protocol.scan_disable(), Packet(Opcode.SCAN_DISABLE)),
+    ],
+)
+async def test_commands_send_their_ssi_packet_and_complete_on_ack(connect, call, packet: Packet) -> None:
+    """Each command sends the packet the SSI guide defines and returns once the scanner ACKs it."""
+    scanner = FakeScanner({Opcode(packet.opcode): [ACK]})
+    protocol = await connect(scanner)
+
+    await call(protocol)
+
+    assert scanner.received == [packet]
+
+
+async def test_scanning_state_follows_enable_and_disable(connect) -> None:
+    """The tracked state changes only once the scanner has acknowledged the request."""
+    scanner = FakeScanner({Opcode.SCAN_DISABLE: [ACK, nak(NakCause.DENIED)], Opcode.SCAN_ENABLE: [ACK]})
+    protocol = await connect(scanner)
+
+    await protocol.scan_disable()
+    assert not protocol.scanning_enabled
+
+    await protocol.scan_enable()
+    assert protocol.scanning_enabled
+
+    with pytest.raises(CommandRejectedError):
+        await protocol.scan_disable()
+    assert protocol.scanning_enabled
+
+
+async def test_a_refused_aim_is_reported(connect) -> None:
+    """Decoders without an aim pattern NAK it as denied (SSI guide p. 2-8)."""
+    protocol = await connect(FakeScanner({Opcode.AIM_ON: [nak(NakCause.DENIED)]}))
+
+    with pytest.raises(CommandRejectedError, match="AIM_ON.*DENIED"):
+        await protocol.aim_on()
+
+
+# - Scanning --------------------------------------------------------------------------------------------------------
+
+UPC_E = decoder(Opcode.DECODE_DATA, b"\x0904252614")
+
+
+async def test_scan_returns_the_bar_code_decoded_after_the_session_starts(connect) -> None:
+    """START_DECODE is ACKed, then the decode data arrives and is returned parsed; no STOP_DECODE is needed."""
+    scanner = FakeScanner({Opcode.START_DECODE: [[ACK, UPC_E]]})
+    protocol = await connect(scanner)
+
+    decoded = await protocol.scan(timeout=1)
+
+    assert (decoded.symbology, decoded.text) == (ssi.Symbology.UPC_E, "04252614")
+    assert scanner.opcodes() == [Opcode.START_DECODE, Opcode.CMD_ACK]
+
+
+async def test_scan_catches_decode_data_arriving_before_the_ack(connect) -> None:
+    """The subscription is open before START_DECODE goes out, so an early bar code is not lost."""
+    protocol = await connect(FakeScanner({Opcode.START_DECODE: [[UPC_E, ACK]]}))
+
+    assert (await protocol.scan(timeout=1)).text == "04252614"
+
+
+async def test_scan_skips_events(connect) -> None:
+    """An event during the session, e.g. a decode event, is not mistaken for the bar code."""
+    protocol = await connect(FakeScanner({Opcode.START_DECODE: [[ACK, decoder(Opcode.EVENT, b"\x01"), UPC_E]]}))
+
+    assert (await protocol.scan(timeout=1)).text == "04252614"
+
+
+async def test_scan_without_a_bar_code_stops_the_session_and_reports_it(connect) -> None:
+    """When the timeout passes, the session is stopped explicitly and NoBarcodeDecodedError is raised."""
+    scanner = FakeScanner({Opcode.START_DECODE: [ACK], Opcode.STOP_DECODE: [ACK]})
+    protocol = await connect(scanner)
+
+    with pytest.raises(NoBarcodeDecodedError, match="0.2 s"):
+        await protocol.scan(timeout=0.2)
+    assert scanner.opcodes() == [Opcode.START_DECODE, Opcode.STOP_DECODE]
+
+
+async def test_a_cancelled_scan_stops_the_session(connect) -> None:
+    """Cancelling the scan, e.g. a client cancelling the SiLA command, does not leave the scanner scanning."""
+    scanner = FakeScanner({Opcode.START_DECODE: [ACK], Opcode.STOP_DECODE: [ACK]})
+    protocol = await connect(scanner)
+
+    task = asyncio.create_task(protocol.scan(timeout=5))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert scanner.opcodes() == [Opcode.START_DECODE, Opcode.STOP_DECODE]
+
+
+async def test_a_failed_stop_does_not_hide_the_missing_bar_code(connect) -> None:
+    """If STOP_DECODE goes unanswered after a timeout, the caller still learns that nothing was decoded."""
+    protocol = await connect(FakeScanner({Opcode.START_DECODE: [ACK]}))
+
+    with pytest.raises(NoBarcodeDecodedError):
+        await protocol.scan(timeout=0.1)
+
+
+async def test_scan_is_refused_while_scanning_is_disabled(connect) -> None:
+    """The precondition is checked before anything is sent to the scanner."""
+    scanner = FakeScanner({Opcode.SCAN_DISABLE: [ACK]})
+    protocol = await connect(scanner)
+    await protocol.scan_disable()
+    scanner.received.clear()
+
+    with pytest.raises(ScanningDisabledError):
+        await protocol.scan(timeout=1)
+    assert scanner.received == []
+
+
+async def test_a_second_scan_is_refused_while_one_is_in_progress(connect) -> None:
+    """Concurrent scans would share one decode session, so the second raises ScannerBusyError."""
+    scanner = FakeScanner({Opcode.START_DECODE: [ACK], Opcode.STOP_DECODE: [ACK]})
+    protocol = await connect(scanner)
+
+    first = asyncio.create_task(protocol.scan(timeout=0.3))
+    await asyncio.sleep(0.05)
+    with pytest.raises(ScannerBusyError):
+        await protocol.scan(timeout=1)
+    with pytest.raises(NoBarcodeDecodedError):
+        await first
+
+    assert scanner.opcodes().count(Opcode.START_DECODE) == 1
+
+
+async def test_a_refused_session_start_is_reported(connect) -> None:
+    """A DENIED START_DECODE, e.g. in a trigger mode that does not allow it, surfaces as CommandRejectedError."""
+    protocol = await connect(FakeScanner({Opcode.START_DECODE: [nak(NakCause.DENIED)]}))
+
+    with pytest.raises(CommandRejectedError, match="START_DECODE.*DENIED"):
+        await protocol.scan(timeout=1)
+
+
+async def test_decodes_yields_trigger_scans_and_skips_events(connect) -> None:
+    """Every decode data message becomes a parsed bar code, whatever started the decode."""
+    protocol = await connect(FakeScanner())
+    iterator = protocol.decodes()
+    first = asyncio.ensure_future(anext(iterator))
+    await settle()
+
+    protocol.data_received(decoder(Opcode.EVENT, b"\x03"))
+    protocol.data_received(UPC_E)
+    protocol.data_received(decoder(Opcode.DECODE_DATA, b"\x031234567890"))
+
+    assert (await first).text == "04252614"
+    assert (await anext(iterator)).symbology is ssi.Symbology.CODE_128
+    await iterator.aclose()
+
+
 # - Unsolicited packets ---------------------------------------------------------------------------------------------
 
 
@@ -371,3 +538,61 @@ async def test_listeners_stop_receiving_once_their_context_closes(connect) -> No
     await settle()
 
     assert messages.empty()
+
+
+async def test_aclose_closes_even_if_queued_writes_never_drain(connect, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Waiting for the last ACK to go out is bounded, so teardown never hangs on a stuck port."""
+    monkeypatch.setattr(protocol_module, "FLUSH_TIMEOUT", 0.05)
+    protocol = await connect(FakeScanner())
+    transport = protocol.transport
+    monkeypatch.setattr(type(transport), "writes_pending", property(lambda _: True))
+
+    await asyncio.wait_for(protocol.aclose(), timeout=1)
+
+    assert transport.is_closing()
+
+
+# - Cradle attributes -----------------------------------------------------------------------------------------------
+
+PACKET_SIZE = decoder(Opcode.SSI_MGMT_COMMAND, bytes.fromhex("00 08 20 00 00 F0 00 F0"))
+
+
+def attribute_reply(hex_string: str) -> bytes:
+    return decoder(Opcode.SSI_MGMT_COMMAND, bytes.fromhex(hex_string))
+
+
+async def test_cradle_information_is_read_after_one_packet_size_request(connect) -> None:
+    """The PRG's required Get Packet Size goes out once per connection, before the first attribute read."""
+    scanner = FakeScanner(
+        {
+            Opcode.SSI_MGMT_COMMAND: [
+                PACKET_SIZE,
+                attribute_reply(
+                    "00 21 02 00 02 15 53 01 00 13 00 00 43 52 38 31 37 38 2D 53 43 31 30 30 46 34 57 57 20 20 00 FF FF"
+                ),
+                attribute_reply("00 16 02 00 02 17 53 01 00 08 00 00 31 30 44 45 43 32 35 00 FF FF"),
+            ]
+        }
+    )
+    protocol = await connect(scanner)
+
+    assert await protocol.get_cradle_model() == "CR8178-SC100F4WW"
+    assert await protocol.get_cradle_manufacture_date() == datetime.date(2025, 12, 10)
+    assert [packet.data[2] for packet in scanner.received] == [0x20, 0x02, 0x02]
+
+
+async def test_an_unsupported_cradle_attribute_is_unexpected(connect) -> None:
+    """A cradle that leaves the serial number out of its reply is reported rather than returning nothing."""
+    protocol = await connect(FakeScanner({Opcode.SSI_MGMT_COMMAND: [PACKET_SIZE, attribute_reply("00 06 02 00 FF FF")]}))
+
+    with pytest.raises(UnexpectedResponseError, match="SERIAL_NUMBER"):
+        await protocol.get_cradle_serial_number()
+
+
+async def test_an_unprogrammed_manufacture_date_is_unexpected(connect) -> None:
+    """The DDMMMYY placeholder some date attributes carry (e.g. attribute 614) is not a date."""
+    placeholder = attribute_reply("00 16 02 00 02 17 53 01 00 08 00 00 44 44 4D 4D 4D 59 59 00 FF FF")
+    protocol = await connect(FakeScanner({Opcode.SSI_MGMT_COMMAND: [PACKET_SIZE, placeholder]}))
+
+    with pytest.raises(UnexpectedResponseError, match="DDMMMYY"):
+        await protocol.get_cradle_manufacture_date()

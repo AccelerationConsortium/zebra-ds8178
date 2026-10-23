@@ -2,14 +2,26 @@ import asyncio
 import collections.abc
 import contextlib
 import dataclasses
+import datetime
 
 import serial.tools.list_ports
 
 from unitelabs.bus import CommandExecutionError, Protocol, TransportFactory, create_serial_connection
 
-from ..constants import CHARACTER_TIMEOUT, OPEN_TIMEOUT, RETRIES, ZEBRA_USB_VENDOR_ID
-from .errors import CommandRejectedError, ScannerNotRespondingError, SerialPortNotFoundError, UnexpectedResponseError
+from ..constants import CHARACTER_TIMEOUT, FLUSH_TIMEOUT, OPEN_TIMEOUT, RETRIES, ZEBRA_USB_VENDOR_ID
+from .errors import (
+    CommandRejectedError,
+    NoBarcodeDecodedError,
+    ScannerBusyError,
+    ScannerNotRespondingError,
+    ScanningDisabledError,
+    SerialPortNotFoundError,
+    UnexpectedResponseError,
+)
+from .rsm import Attribute, encode_attribute_get, encode_get_packet_size, parse_attribute_get
 from .ssi import (
+    BeepCode,
+    DecodeData,
     NakCause,
     Opcode,
     Packet,
@@ -19,6 +31,7 @@ from .ssi import (
     encode_param_send,
     frame_length,
     join_message,
+    parse_decode_data,
     parse_nak_cause,
     parse_param_send,
     parse_revision,
@@ -49,6 +62,9 @@ class ZebraDs8178Protocol(Protocol):
         self._unsolicited: list[Packet] = []
         self._previous_unsolicited: Packet | None = None
         self._listeners: set[asyncio.Queue[Packet]] = set()
+        self._scanning_enabled = True
+        self._scan_lock = asyncio.Lock()
+        self._rsm_ready = False
 
     async def open_device(self) -> None:
         """
@@ -71,19 +87,35 @@ class ZebraDs8178Protocol(Protocol):
             msg = f"Cannot open serial port {port} ({error}); check the cable and that no other program uses it."
             raise SerialPortNotFoundError(msg) from error
 
+    async def aclose(self) -> None:
+        """
+        Close the connection once queued writes have gone out, waiting at most `FLUSH_TIMEOUT`.
+
+        The serial transport closes its port at once, failing any write still buffered; an ACK lost that way makes
+        the scanner resend the scan and then sound its transmit error beeps (SSI guide p. 2-26).
+        """
+        # The transport signals no event once its buffer drains, so it is polled.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + FLUSH_TIMEOUT
+        while getattr(self.transport, "writes_pending", False) and loop.time() < deadline:  # noqa: ASYNC110
+            await asyncio.sleep(0.005)
+        self.close()
+
     async def identity(self, **_kwargs) -> bool:
         """
-        Confirm an SSI scanner answers and switch it to packeted decode data; called on every (re)connect.
+        Confirm an SSI scanner answers, then set packeted decode data and enable scanning; runs on every (re)connect.
 
         The packet format is checked and only written when it differs, as a permanent change: a temporary one is lost
         when the scanner powers down while the cradle stays connected, and each permanent write wears the scanner's
-        non-volatile memory (Product Reference Guide p. 9-6).
+        non-volatile memory (Product Reference Guide p. 9-6). Scanning is enabled so that `scanning_enabled` matches
+        the scanner even if a previous connection left it disabled.
         """
         try:
             await self.get_revision()
             parameters = await self.get_parameters(DECODE_DATA_PACKET_FORMAT)
             if parameters.get(DECODE_DATA_PACKET_FORMAT) != PACKETED:
                 await self.set_parameters({DECODE_DATA_PACKET_FORMAT: PACKETED}, permanent=True)
+            await self.scan_enable()
         except (ScannerNotRespondingError, CommandRejectedError, UnexpectedResponseError):
             self.logger.warning("Scanner did not complete the connection checks.", exc_info=True)
             return False  # `Protocol.validate` keeps waiting, bounded by `_reopen`
@@ -139,6 +171,184 @@ class ZebraDs8178Protocol(Protocol):
             yield queue
         finally:
             self._listeners.discard(queue)
+
+    @property
+    def scanning_enabled(self) -> bool:
+        """Whether the scanner accepts trigger pulls and scan requests, as last set by `scan_enable`/`scan_disable`."""
+        return self._scanning_enabled
+
+    async def scan_enable(self) -> None:
+        """
+        Permit scanning by trigger and by request (SCAN_ENABLE, SSI guide p. 2-62).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the request.
+        """
+        await self.request(Packet(Opcode.SCAN_ENABLE))
+        self._scanning_enabled = True
+
+    async def scan_disable(self) -> None:
+        """
+        Make the scanner ignore the trigger and scan requests (SCAN_DISABLE, SSI guide p. 2-61).
+
+        Scanning stays disabled until `scan_enable`, a reconnect, or the scanner powering up again.
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the request.
+        """
+        await self.request(Packet(Opcode.SCAN_DISABLE))
+        self._scanning_enabled = False
+
+    async def beep(self, code: BeepCode) -> None:
+        """
+        Sound a beep sequence (BEEP, SSI guide p. 2-10).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the beep code.
+        """
+        await self.request(Packet(Opcode.BEEP, bytes([code])))
+
+    async def scan(self, timeout: float) -> DecodeData:
+        """
+        Start a decode session, as if the trigger were pulled, and return the first bar code decoded.
+
+        The subscription opens before START_DECODE is sent, so decode data arriving ahead of the ACK is not missed;
+        a bar code read by a trigger pull during the session counts as well. The SSI guide requires the Host trigger
+        mode for START_DECODE (p. 2-65), which the DS8178 does not list; on hardware it is accepted in the default
+        Level mode, and refused as DENIED while scanning is disabled. The session is stopped when `timeout` passes or
+        the scan is cancelled. The scanner also ends it after its own Decode Session Timeout, so `timeout` must not
+        exceed it (see `MAX_SCAN_TIMEOUT`).
+
+        Args:
+          timeout: How long to wait for a bar code, in seconds.
+
+        Raises:
+          ScanningDisabledError: If scanning is disabled.
+          ScannerBusyError: If another scan is in progress.
+          NoBarcodeDecodedError: If no bar code is decoded within `timeout`.
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses to start the session.
+        """
+        if not self._scanning_enabled:
+            msg = "Scanning is disabled; enable scanning, then retry."
+            raise ScanningDisabledError(msg)
+        if self._scan_lock.locked():
+            msg = "A scan is already in progress; wait for it to finish, then retry."
+            raise ScannerBusyError(msg)
+
+        async with self._scan_lock:
+            with self.listen() as messages:
+                await self.start_decode()
+                try:
+                    return await asyncio.wait_for(self._next_decode(messages), timeout=timeout)
+                except TimeoutError:
+                    await self._stop_decode_quietly()
+                    msg = f"No bar code was decoded within {timeout:g} s."
+                    raise NoBarcodeDecodedError(msg) from None
+                except BaseException:
+                    await self._stop_decode_quietly()
+                    raise
+
+    async def decodes(self) -> collections.abc.AsyncIterator[DecodeData]:
+        """Yield every bar code the scanner decodes from now on, by trigger pull, presentation or `scan`."""
+        with self.listen() as messages:
+            while True:
+                yield await self._next_decode(messages)
+
+    async def start_decode(self) -> None:
+        """
+        Start a decode session (START_DECODE, called START_SESSION in the SSI guide, p. 2-65).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses to start the session.
+        """
+        await self.request(Packet(Opcode.START_DECODE))
+
+    async def stop_decode(self) -> None:
+        """
+        Abort the decode session (STOP_DECODE, called STOP_SESSION in the SSI guide, p. 2-66).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the request.
+        """
+        await self.request(Packet(Opcode.STOP_DECODE))
+
+    async def aim_on(self) -> None:
+        """
+        Project the aiming pattern until `aim_off` (AIM_ON, SSI guide p. 2-8).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner has no aiming pattern it can switch on.
+        """
+        await self.request(Packet(Opcode.AIM_ON))
+
+    async def aim_off(self) -> None:
+        """
+        Switch the aiming pattern off (AIM_OFF, SSI guide p. 2-7).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner has no aiming pattern it can switch off.
+        """
+        await self.request(Packet(Opcode.AIM_OFF))
+
+    async def get_cradle_model(self) -> str:
+        """
+        Read the cradle's model number, e.g. `CR8178-SC100F4WW` (attribute 533).
+
+        Raises:
+          ScannerNotRespondingError: If the cradle does not answer.
+          UnexpectedResponseError: If the cradle does not report its model number.
+        """
+        return await self._get_string_attribute(Attribute.MODEL_NUMBER)
+
+    async def get_cradle_serial_number(self) -> str:
+        """
+        Read the cradle's serial number, as printed on its label (attribute 534).
+
+        Raises:
+          ScannerNotRespondingError: If the cradle does not answer.
+          UnexpectedResponseError: If the cradle does not report its serial number.
+        """
+        return await self._get_string_attribute(Attribute.SERIAL_NUMBER)
+
+    async def get_cradle_manufacture_date(self) -> datetime.date:
+        """
+        Read the date the cradle was made (attribute 535, reported as `DDMMMYY`, e.g. `10DEC25`).
+
+        Raises:
+          ScannerNotRespondingError: If the cradle does not answer.
+          UnexpectedResponseError: If the cradle does not report a date in that format.
+        """
+        value = await self._get_string_attribute(Attribute.DATE_OF_MANUFACTURE)
+        try:
+            return datetime.datetime.strptime(value, "%d%b%y").date()
+        except ValueError as error:
+            msg = f"Expected a manufacture date like 10DEC25, received {value!r}."
+            raise UnexpectedResponseError(msg) from error
+
+    async def get_attributes(self, *attributes: int) -> dict[int, int | str | bytes]:
+        """
+        Read RSM attributes; over USB CDC these are the cradle's, and unsupported ones are absent (PRG p. 9-8).
+
+        The Get Packet Size command the PRG requires before any RSM command is sent once per connection.
+
+        Raises:
+          ScannerNotRespondingError: If the cradle does not answer.
+          CommandRejectedError: If the cradle does not support RSM.
+          UnexpectedResponseError: If the reply cannot be parsed.
+        """
+        if not self._rsm_ready:
+            await self.request(Packet(Opcode.SSI_MGMT_COMMAND, encode_get_packet_size()), reply=Opcode.SSI_MGMT_COMMAND)
+            self._rsm_ready = True
+        request = Packet(Opcode.SSI_MGMT_COMMAND, encode_attribute_get(*attributes))
+        return parse_attribute_get(await self.request(request, reply=Opcode.SSI_MGMT_COMMAND))
 
     async def get_revision(self) -> str:
         """
@@ -228,6 +438,28 @@ class ZebraDs8178Protocol(Protocol):
         for listener in self._listeners:
             listener.put_nowait(message)
 
+    async def _get_string_attribute(self, attribute: Attribute) -> str:
+        value = (await self.get_attributes(attribute)).get(attribute)
+        if not isinstance(value, str):
+            msg = f"The cradle did not report attribute {attribute} ({attribute.name}) as text, received {value!r}."
+            raise UnexpectedResponseError(msg)
+
+        return value
+
+    @staticmethod
+    async def _next_decode(messages: asyncio.Queue[Packet]) -> DecodeData:
+        """Wait for the next decode data among the unsolicited messages, skipping events."""
+        while (message := await messages.get()).opcode != Opcode.DECODE_DATA:
+            pass
+        return parse_decode_data(message.data)
+
+    async def _stop_decode_quietly(self) -> None:
+        """Stop a session that is ending anyway; a failure here must not hide the error that ended it."""
+        try:
+            await self.stop_decode()
+        except (ScannerNotRespondingError, CommandRejectedError, UnexpectedResponseError):
+            self.logger.warning("Could not stop the decode session.", exc_info=True)
+
     def _send(self, packet: Packet) -> None:
         if self.transport and not self.transport.is_closing():
             self.logger.info("> %s", packet.encode())
@@ -239,8 +471,9 @@ class ZebraDs8178Protocol(Protocol):
 
     async def _reopen(self, transport_factory: TransportFactory, transport_kwargs: dict) -> None:
         """Replace the current transport, bounded in time because a port that never opens does not raise."""
-        self.close()
+        await self.aclose()
         self._buffer, self._unsolicited, self._previous_unsolicited = b"", [], None
+        self._rsm_ready = False
         self._transport_factory = transport_factory
         self._transport_kwargs = transport_kwargs
         try:
