@@ -15,6 +15,7 @@ from unitelabs.zebra_ds8178.io.ssi import (
     encode_param_number,
     encode_param_send,
     join_message,
+    parse_param_request,
     parse_decode_data,
     parse_event,
     parse_nak_cause,
@@ -215,3 +216,18 @@ def test_joins_multipacket_messages(opcode, parts, joined) -> None:
     packets.append(Packet(opcode, parts[-1], source=Source.DECODER))
 
     assert join_message(packets) == Packet(opcode, joined, source=Source.DECODER)
+
+
+@pytest.mark.parametrize(
+    ("data", "numbers"),
+    [("EE 88", [238, 136]), ("F0 4E F8 05 2C", [334, 1324]), ("FE", [0xFE]), ("FE 01", [0xFE, 1])],
+)
+def test_parses_parameter_request_numbers(data: str, numbers: list[int]) -> None:
+    """Request numbers decode with the same prefixes as replies; a leading FE asks for all parameters."""
+    assert parse_param_request(frame(data)) == numbers
+
+
+def test_rejects_a_truncated_parameter_request() -> None:
+    """A page prefix without its number is reported."""
+    with pytest.raises(UnexpectedResponseError, match="truncated"):
+        parse_param_request(frame("EE F0"))

@@ -5,6 +5,7 @@ from unitelabs.cdk import Connector
 from unitelabs.cdk.features.core.lock_controller import LockController
 
 from .config import ZebraDs8178Config
+from .features import SimulationController
 from .io import ZebraDs8178Protocol
 
 __version__ = version("unitelabs-zebra-ds8178")
@@ -14,12 +15,15 @@ async def create_app(config: ZebraDs8178Config) -> collections.abc.AsyncGenerato
     """Create the connector application."""
 
     app = Connector(config)
-    app.register(LockController())
-
     protocol = ZebraDs8178Protocol(port=config.serial_port)
-    if not config.simulation_mode:
+
+    app.register(SimulationController(protocol, simulation_mode=config.simulation_mode))
+    if config.simulation_mode:
+        await protocol.open_simulation()
+    else:
         await protocol.open_device()
 
+    app.register(LockController())
     try:
         yield app
     finally:

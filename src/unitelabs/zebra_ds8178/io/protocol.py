@@ -19,6 +19,7 @@ from .errors import (
     UnexpectedResponseError,
 )
 from .rsm import Attribute, encode_attribute_get, encode_get_packet_size, parse_attribute_get
+from .simulation import SimulatedScanner
 from .ssi import (
     BeepCode,
     DecodeData,
@@ -54,9 +55,11 @@ class ZebraDs8178Protocol(Protocol):
     arrive unsolicited at any time; they are acknowledged here and handed to every `listen` subscriber.
     """
 
-    def __init__(self, port: str | None = None, **kwargs):
+    def __init__(self, port: str | None = None, simulated_scanner: SimulatedScanner | None = None, **kwargs):
         super().__init__(create_serial_connection, **kwargs)
         self._port = port
+        # Created once, so the simulated scanner keeps its settings across mode switches like one left in its cradle.
+        self._simulated_scanner = simulated_scanner or SimulatedScanner()
         self._buffer = b""
         self._stale_buffer: asyncio.TimerHandle | None = None
         self._unsolicited: list[Packet] = []
@@ -71,9 +74,11 @@ class ZebraDs8178Protocol(Protocol):
         Connect to the scanner on the configured serial port, or on the one Zebra cradle found by its USB ID.
 
         Raises:
+          ScannerBusyError: If a scan is in progress, which switching the connection would cut off.
           SerialPortNotFoundError: If no single Zebra cradle is found, or the serial port cannot be opened.
           ScannerNotRespondingError: If the port opens but the scanner does not answer in time.
         """
+        self._check_not_scanning()
         port = self._port or self._find_cradle_port()
         try:
             await self._reopen(create_serial_connection, {"port": port})
@@ -86,6 +91,15 @@ class ZebraDs8178Protocol(Protocol):
         except OSError as error:  # after TimeoutError, which subclasses it
             msg = f"Cannot open serial port {port} ({error}); check the cable and that no other program uses it."
             raise SerialPortNotFoundError(msg) from error
+
+    async def open_simulation(self) -> None:
+        """
+        Connect to the simulated scanner, which keeps its settings and scanning state across mode switches.
+
+        Raises:
+          ScannerBusyError: If a scan is in progress, which switching the connection would cut off.
+        """
+        await self._reopen(self._simulated_scanner.connection_factory(), {})
 
     async def aclose(self) -> None:
         """
@@ -470,7 +484,15 @@ class ZebraDs8178Protocol(Protocol):
         self._buffer, self._stale_buffer = b"", None
 
     async def _reopen(self, transport_factory: TransportFactory, transport_kwargs: dict) -> None:
-        """Replace the current transport, bounded in time because a port that never opens does not raise."""
+        """
+        Replace the current transport, bounded in time because a port that never opens does not raise.
+
+        A scan in progress is checked before anything is closed, so a refused switch leaves the connection as it was.
+
+        Raises:
+          ScannerBusyError: If a scan is in progress.
+        """
+        self._check_not_scanning()
         await self.aclose()
         self._buffer, self._unsolicited, self._previous_unsolicited = b"", [], None
         self._rsm_ready = False
@@ -481,6 +503,12 @@ class ZebraDs8178Protocol(Protocol):
         except BaseException:
             self.close()
             raise
+
+    def _check_not_scanning(self) -> None:
+        """Refuse to replace the connection while a scan runs on it, before anything is looked up or closed."""
+        if self._scan_lock.locked():
+            msg = "A scan is in progress; wait for it to finish, then switch mode."
+            raise ScannerBusyError(msg)
 
     @staticmethod
     def _find_cradle_port() -> str:

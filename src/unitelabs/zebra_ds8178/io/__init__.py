@@ -8,6 +8,7 @@ from .errors import (
     UnexpectedResponseError,
 )
 from .protocol import ZebraDs8178Protocol
+from .simulation import SimulatedScanner
 
 __all__ = [
     "CommandRejectedError",
@@ -16,6 +17,7 @@ __all__ = [
     "ScannerNotRespondingError",
     "ScanningDisabledError",
     "SerialPortNotFoundError",
+    "SimulatedScanner",
     "UnexpectedResponseError",
     "ZebraDs8178Protocol",
 ]

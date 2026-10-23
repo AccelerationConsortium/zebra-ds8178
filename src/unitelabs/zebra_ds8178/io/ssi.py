@@ -4,16 +4,19 @@ Packets of Zebra's Simple Serial Interface (SSI).
 Sources: SSI Programmer's Guide 72E-40451-04 ("SSI guide") and the DS8178 Product Reference Guide ("PRG"), chapter 9.
 This module only builds and parses bytes; sending, ACK/NAK handshaking and retries live in the protocol.
 
-Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC): framing and checksum, REQUEST_REVISION, BEEP,
-AIM_ON/AIM_OFF (the red aiming pattern), SCAN_ENABLE/SCAN_DISABLE (a disabled scanner NAKs START_DECODE as
-DENIED), STOP_DECODE, PARAM_SEND, PARAM_REQUEST with byte
-values and F0/F1 parameter numbers, START_DECODE, DECODE_DATA for the six Appendix F sample symbologies, and a NAK
-RESEND answered by a resend with the retransmit bit set (the scanner NAKs the first request after the port opens).
+Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC):
+- Framing and checksum, and a NAK RESEND answered by a resend with the retransmit bit set; the scanner NAKs the
+  first request after the port opens.
+- REQUEST_REVISION, BEEP, and AIM_ON/AIM_OFF, which switch the red aiming pattern.
+- PARAM_REQUEST with byte values and F0/F1 parameter numbers, and PARAM_SEND.
+- START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies.
+- SCAN_ENABLE/SCAN_DISABLE; a disabled scanner NAKs START_DECODE as DENIED.
 
 Known gaps, to verify on hardware:
 - The DS8178 sets bit 7 of the status byte on its replies, which the SSI guide marks as unused; it is masked off.
 - LED_ON and LED_OFF are ACKed for LED bits 0 to 2 (bit 3 is DENIED) but light no LED on the DS8178 in its
-  cradle, so they are not used; the PRG's Beeper/LED attribute 6000 is the documented alternative.
+  cradle, so they are not used. The PRG's Beeper/LED attribute 6000 would reach the cradle rather than the scanner
+  over USB CDC (see `rsm`), and its set command is undocumented.
 - The multipacket decode data format, string/array/multipacket parameter replies and the symbology IDs beyond the
   six sampled ones follow the SSI guide only.
 """
@@ -523,6 +526,34 @@ def encode_param_send(parameters: dict[int, int], beep: int = NO_BEEP) -> bytes:
     )
 
 
+ALL_PARAMETERS = 0xFE
+"""Parameter number requesting every supported parameter; only valid first in a PARAM_REQUEST (SSI guide p. 2-55)."""
+
+
+def parse_param_request(data: bytes) -> list[int]:
+    """
+    Parse the parameter numbers of a PARAM_REQUEST, e.g. `EE 88` to `[238, 136]` (SSI guide table 2-67).
+
+    A leading `FE` (`ALL_PARAMETERS`) is returned as is.
+
+    Raises:
+      UnexpectedResponseError: If the data ends in the middle of a parameter number.
+    """
+    numbers, position = [], 0
+    try:
+        while position < len(data):
+            if position == 0 and data[0] == ALL_PARAMETERS:
+                number, position = ALL_PARAMETERS, 1
+            else:
+                number, position = _read_param_number(data, position)
+            numbers.append(number)
+    except IndexError as error:
+        msg = f"Received a truncated PARAM_REQUEST {data.hex(' ')}."
+        raise UnexpectedResponseError(msg) from error
+
+    return numbers
+
+
 def parse_param_send(data: bytes) -> dict[int, int | bytes]:
     """
     Parse the data of a PARAM_SEND reply to a PARAM_REQUEST (SSI guide tables 2-68 and 2-72).
@@ -566,7 +597,7 @@ def parse_param_send(data: bytes) -> dict[int, int | bytes]:
 def _read_param_number(data: bytes, position: int) -> tuple[int, int]:
     prefix = data[position]
     if prefix in _PARAM_PAGES:
-        return _PARAM_PAGES[prefix] + data[position + 1], position + 2
+        return _PARAM_PAGES[prefix] + _read(data, position + 1, 1)[0], position + 2
     if prefix == _PARAM_EXTENDED:
         return int.from_bytes(_read(data, position + 1, 2), "big"), position + 3
 
