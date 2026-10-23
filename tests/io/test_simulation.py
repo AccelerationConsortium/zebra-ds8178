@@ -45,8 +45,8 @@ async def test_scans_cycle_through_the_appendix_f_samples(simulate) -> None:
 
     first, second = await protocol.scan(timeout=1), await protocol.scan(timeout=1)
 
-    assert (first.symbology, first.text) == (Symbology.UPC_A, "012345678905")
-    assert (second.symbology, second.text) == (Symbology.UPC_E, "04252614")
+    assert (first.symbology, first.data) == (Symbology.UPC_A, "012345678905")
+    assert (second.symbology, second.data) == (Symbology.UPC_E, "04252614")
 
 
 async def test_without_a_bar_code_scans_time_out(simulate) -> None:

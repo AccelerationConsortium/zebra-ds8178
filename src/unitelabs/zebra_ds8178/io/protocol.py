@@ -22,7 +22,7 @@ from .rsm import Attribute, encode_attribute_get, encode_get_packet_size, parse_
 from .simulation import SimulatedScanner
 from .ssi import (
     BeepCode,
-    DecodeData,
+    Barcode,
     NakCause,
     Opcode,
     Packet,
@@ -225,7 +225,7 @@ class ZebraDs8178Protocol(Protocol):
         """
         await self.request(Packet(Opcode.BEEP, bytes([code])))
 
-    async def scan(self, timeout: float) -> DecodeData:
+    async def scan(self, timeout: float) -> Barcode:
         """
         Start a decode session, as if the trigger were pulled, and return the first bar code decoded.
 
@@ -266,7 +266,7 @@ class ZebraDs8178Protocol(Protocol):
                     await self._stop_decode_quietly()
                     raise
 
-    async def decodes(self) -> collections.abc.AsyncIterator[DecodeData]:
+    async def decodes(self) -> collections.abc.AsyncIterator[Barcode]:
         """Yield every bar code the scanner decodes from now on, by trigger pull, presentation or `scan`."""
         with self.listen() as messages:
             while True:
@@ -461,7 +461,7 @@ class ZebraDs8178Protocol(Protocol):
         return value
 
     @staticmethod
-    async def _next_decode(messages: asyncio.Queue[Packet]) -> DecodeData:
+    async def _next_decode(messages: asyncio.Queue[Packet]) -> Barcode:
         """Wait for the next decode data among the unsolicited messages, skipping events."""
         while (message := await messages.get()).opcode != Opcode.DECODE_DATA:
             pass

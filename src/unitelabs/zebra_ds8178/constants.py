@@ -1,3 +1,9 @@
+ORIGINATOR = "ca.accelerationconsortium"
+"""Reverse-domain originator of every feature; the Acceleration Consortium's, as in its other connectors."""
+
+CATEGORY = "barcodereader"
+"""Functional category of every DS8178 feature."""
+
 ZEBRA_USB_VENDOR_ID = 0x05E0
 """USB vendor ID of the cradle, used to find its serial port when none is configured."""
 

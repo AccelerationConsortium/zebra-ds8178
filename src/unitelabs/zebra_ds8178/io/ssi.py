@@ -380,36 +380,29 @@ class SsiCommand(Command[Packet, Packet]):
 
 
 @dataclasses.dataclass(frozen=True)
-class DecodeData:
+class Barcode:
     """
-    A decoded bar code from a DECODE_DATA packet.
+    A bar code decoded by the scanner.
 
     Attributes:
       Symbology: The bar code type.
-      Data: The decoded bytes, including any configured prefix and suffix.
+      Data: The decoded content, including any prefix and suffix configured on the scanner.
     """
 
     symbology: Symbology
-    data: bytes
-
-    @property
-    def text(self) -> str:
-        """
-        The data as text.
-
-        The SSI guide calls the data "ASCII" (p. 2-28), but 2D codes may carry UTF-8 and GS1 codes carry the GS
-        (0x1D) separator; UTF-8 covers both, and invalid bytes are replaced rather than dropped.
-        """
-        return self.data.decode("utf-8", errors="replace")
+    data: str
 
 
-def parse_decode_data(data: bytes) -> DecodeData:
+def parse_decode_data(data: bytes) -> Barcode:
     """
     Parse the data of a reassembled DECODE_DATA message: `<bar code type> <decode data...>` (SSI guide table 2-34).
 
     For the multipacket format (type 0x99) the data is `<actual type> <count>` followed by `count` segments of
     `<spare> <length high> <length low> <bytes...>` (SSI guide table 2-36); the segments are joined in order, which
     for structured append places the control block after the main data. Not verified on hardware.
+
+    The SSI guide calls the data "ASCII" (p. 2-28), but 2D codes may carry UTF-8 and GS1 codes carry the GS (0x1D)
+    separator; it is decoded as UTF-8, which covers both, with invalid bytes replaced rather than dropped.
 
     Raises:
       UnexpectedResponseError: If the data is empty or a multipacket segment is truncated.
@@ -419,7 +412,7 @@ def parse_decode_data(data: bytes) -> DecodeData:
         raise UnexpectedResponseError(msg)
 
     if data[0] != MULTIPACKET_FORMAT:
-        return DecodeData(symbology=Symbology(data[0]), data=data[1:])
+        return Barcode(symbology=Symbology(data[0]), data=_decode_text(data[1:]))
 
     if len(data) < 3:
         msg = f"Received a truncated multipacket DECODE_DATA {data.hex(' ')}."
@@ -435,7 +428,7 @@ def parse_decode_data(data: bytes) -> DecodeData:
         segments.append(segment)
         position += 3 + length
 
-    return DecodeData(symbology=Symbology(data[1]), data=b"".join(segments))
+    return Barcode(symbology=Symbology(data[1]), data=_decode_text(b"".join(segments)))
 
 
 def parse_revision(data: bytes) -> str:
@@ -610,3 +603,7 @@ def _read(data: bytes, position: int, length: int) -> bytes:
         raise IndexError(position)
 
     return chunk
+
+
+def _decode_text(data: bytes) -> str:
+    return data.decode("utf-8", errors="replace")

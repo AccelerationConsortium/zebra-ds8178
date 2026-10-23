@@ -48,7 +48,7 @@ async def test_start_real_mode_with_a_silent_scanner_falls_back_to_simulation(mo
             await controller.start_real_mode()
 
         assert await controller.simulation_mode() is True
-        assert (await protocol.scan(timeout=1)).text == "012345678905"
+        assert (await protocol.scan(timeout=1)).data == "012345678905"
     finally:
         await protocol.aclose()
 

@@ -104,7 +104,7 @@ def test_parses_decode_data(data, symbology, text) -> None:
     decoded = parse_decode_data(data)
 
     assert decoded.symbology == symbology
-    assert decoded.text == text
+    assert decoded.data == text
 
 
 def test_parses_multipacket_decode_data() -> None:
@@ -113,7 +113,7 @@ def test_parses_multipacket_decode_data() -> None:
     decoded = parse_decode_data(frame("99 1A 02 00 00 03") + b"ABC" + frame("00 00 04") + b"DEFG")
 
     assert decoded.symbology == Symbology.MICRO_PDF417
-    assert decoded.data == b"ABCDEFG"
+    assert decoded.data == "ABCDEFG"
 
 
 @pytest.mark.parametrize("data", [b"", frame("99 1A"), frame("99 1A 01 00 00 05") + b"AB"])

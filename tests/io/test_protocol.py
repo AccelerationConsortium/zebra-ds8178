@@ -329,7 +329,7 @@ async def test_scan_returns_the_bar_code_decoded_after_the_session_starts(connec
 
     decoded = await protocol.scan(timeout=1)
 
-    assert (decoded.symbology, decoded.text) == (ssi.Symbology.UPC_E, "04252614")
+    assert (decoded.symbology, decoded.data) == (ssi.Symbology.UPC_E, "04252614")
     assert scanner.opcodes() == [Opcode.START_DECODE, Opcode.CMD_ACK]
 
 
@@ -337,14 +337,14 @@ async def test_scan_catches_decode_data_arriving_before_the_ack(connect) -> None
     """The subscription is open before START_DECODE goes out, so an early bar code is not lost."""
     protocol = await connect(FakeScanner({Opcode.START_DECODE: [[UPC_E, ACK]]}))
 
-    assert (await protocol.scan(timeout=1)).text == "04252614"
+    assert (await protocol.scan(timeout=1)).data == "04252614"
 
 
 async def test_scan_skips_events(connect) -> None:
     """An event during the session, e.g. a decode event, is not mistaken for the bar code."""
     protocol = await connect(FakeScanner({Opcode.START_DECODE: [[ACK, decoder(Opcode.EVENT, b"\x01"), UPC_E]]}))
 
-    assert (await protocol.scan(timeout=1)).text == "04252614"
+    assert (await protocol.scan(timeout=1)).data == "04252614"
 
 
 async def test_scan_without_a_bar_code_stops_the_session_and_reports_it(connect) -> None:
@@ -425,7 +425,7 @@ async def test_decodes_yields_trigger_scans_and_skips_events(connect) -> None:
     protocol.data_received(UPC_E)
     protocol.data_received(decoder(Opcode.DECODE_DATA, b"\x031234567890"))
 
-    assert (await first).text == "04252614"
+    assert (await first).data == "04252614"
     assert (await anext(iterator)).symbology is ssi.Symbology.CODE_128
     await iterator.aclose()
 
@@ -457,7 +457,7 @@ async def test_multipacket_decode_data_is_joined_and_every_packet_acknowledged(c
         protocol.data_received(decoder(Opcode.DECODE_DATA, b"\x1bDEF"))
         await settle()
 
-        assert ssi.parse_decode_data(messages.get_nowait().data) == ssi.DecodeData(ssi.Symbology.DATA_MATRIX, b"ABCDEF")
+        assert ssi.parse_decode_data(messages.get_nowait().data) == ssi.Barcode(ssi.Symbology.DATA_MATRIX, "ABCDEF")
         assert messages.empty()
     assert scanner.opcodes() == [Opcode.CMD_ACK, Opcode.CMD_ACK]
 

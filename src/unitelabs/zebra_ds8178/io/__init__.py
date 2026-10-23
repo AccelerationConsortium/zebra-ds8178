@@ -9,8 +9,11 @@ from .errors import (
 )
 from .protocol import ZebraDs8178Protocol
 from .simulation import SimulatedScanner
+from .ssi import Barcode, BeepCode, Symbology
 
 __all__ = [
+    "Barcode",
+    "BeepCode",
     "CommandRejectedError",
     "NoBarcodeDecodedError",
     "ScannerBusyError",
@@ -18,6 +21,7 @@ __all__ = [
     "ScanningDisabledError",
     "SerialPortNotFoundError",
     "SimulatedScanner",
+    "Symbology",
     "UnexpectedResponseError",
     "ZebraDs8178Protocol",
 ]
