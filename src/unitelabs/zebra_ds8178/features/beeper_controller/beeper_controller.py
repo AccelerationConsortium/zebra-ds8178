@@ -17,6 +17,6 @@ class BeeperController(sila.Feature):
         Sound a beep pattern.
 
         Args:
-          Pattern: The beep sequence, named by length, pitch and count, e.g. SHORT_HIGH_1 for one short high beep.
+          Pattern: The beep sequence, named by length, pitch and count, e.g. 'short high 1' for one short high beep.
         """
         await self.protocol.beep(pattern)
