@@ -23,6 +23,7 @@ from .rsm import Attribute, encode_attribute_get, encode_get_packet_size, parse_
 from .simulation import SimulatedScanner
 from .ssi import (
     BeepCode,
+    BeeperTone,
     Barcode,
     NakCause,
     Opcode,
@@ -43,6 +44,12 @@ DECODE_DATA_PACKET_FORMAT = 238
 """Parameter selecting raw (0) or packeted (1) decode data (Product Reference Guide p. 9-16)."""
 
 PACKETED = 1
+
+BEEP_AFTER_GOOD_DECODE = 56
+"""Parameter: beep after each bar code read (1, the default) or not (0); error beeps still sound (PRG p. 6-6)."""
+
+BEEPER_TONE = 145
+"""Parameter selecting the beeper tone, including off (PRG p. 6-10); see `BeeperTone`."""
 
 UNSOLICITED = (Opcode.DECODE_DATA, Opcode.EVENT)
 """Opcodes the scanner sends on its own rather than as a reply, each of which the host must ACK (SSI guide 1-2)."""
@@ -317,6 +324,57 @@ class ZebraDs8178Protocol(Protocol):
         """
         await self.request(Packet(Opcode.STOP_DECODE))
 
+    async def get_beep_after_good_decode(self) -> bool:
+        """
+        Read whether the scanner beeps after each bar code it decodes (parameter 56, PRG p. 6-6).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          UnexpectedResponseError: If the scanner does not report the parameter.
+        """
+        return bool(await self._get_byte_parameter(BEEP_AFTER_GOOD_DECODE))
+
+    async def set_beep_after_good_decode(self, enabled: bool) -> None:
+        """
+        Turn the beep after each decoded bar code on or off until the scanner powers down (parameter 56).
+
+        The change is temporary, so it does not wear the scanner's non-volatile memory (PRG p. 9-6). With the beep
+        off, the scanner still beeps to indicate errors and while scanning parameter bar codes (PRG p. 6-6).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the setting.
+        """
+        await self.set_parameters({BEEP_AFTER_GOOD_DECODE: int(enabled)})
+
+    async def get_beeper_tone(self) -> BeeperTone:
+        """
+        Read the beeper tone, which is OFF when the scanner's own beeps are silenced (parameter 145, PRG p. 6-10).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          UnexpectedResponseError: If the scanner does not report the parameter, or reports an unknown tone.
+        """
+        value = await self._get_byte_parameter(BEEPER_TONE)
+        try:
+            return BeeperTone(value)
+        except ValueError as error:
+            msg = f"The scanner reported beeper tone {value}, which the Product Reference Guide does not list."
+            raise UnexpectedResponseError(msg) from error
+
+    async def set_beeper_tone(self, tone: BeeperTone) -> None:
+        """
+        Set the beeper tone until the scanner powers down (parameter 145).
+
+        OFF silences the beep after a read; on hardware `beep` and the Bluetooth disconnection beep still sound. The
+        change is temporary, so it does not wear the scanner's non-volatile memory (PRG p. 9-6).
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the setting.
+        """
+        await self.set_parameters({BEEPER_TONE: tone})
+
     async def aim_on(self) -> None:
         """
         Project the aiming pattern until `aim_off` (AIM_ON, SSI guide p. 2-8).
@@ -476,6 +534,14 @@ class ZebraDs8178Protocol(Protocol):
         message, self._unsolicited = join_message(self._unsolicited), []
         for listener in self._listeners:
             listener.put_nowait(message)
+
+    async def _get_byte_parameter(self, number: int) -> int:
+        value = (await self.get_parameters(number)).get(number)
+        if not isinstance(value, int):
+            msg = f"The scanner did not report parameter {number} as a byte value, received {value!r}."
+            raise UnexpectedResponseError(msg)
+
+        return value
 
     async def _get_string_attribute(self, attribute: Attribute) -> str:
         value = (await self.get_attributes(attribute)).get(attribute)

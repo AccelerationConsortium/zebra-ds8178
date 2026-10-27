@@ -82,6 +82,18 @@ async def test_beep_and_aiming_complete(serve) -> None:
         await client.get_unobservable_command(f"{BARCODE_READER}/Command/StopAiming").execute({})
 
 
+async def test_beeper_can_be_silenced_through_a_client(serve) -> None:
+    """The settings are sent and read back as a client sees them: a boolean and the tone's name."""
+    async with serve() as client:
+        await client.get_unobservable_command(f"{BEEPER}/Command/SetBeepAfterScan").execute({"Enabled": False})
+        await client.get_unobservable_command(f"{BEEPER}/Command/SetTone").execute({"Tone": "off"})
+
+        beep_after_scan = await client.get_unobservable_property(f"{BEEPER}/Property/BeepAfterScan").read()
+        tone = await client.get_unobservable_property(f"{BEEPER}/Property/Tone").read()
+
+    assert (beep_after_scan, tone) == (False, "off")
+
+
 async def test_cradle_information_is_typed(serve) -> None:
     """The manufacture date arrives as a SiLA Date; the simulated cradle names itself."""
     async with serve() as client:

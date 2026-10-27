@@ -11,12 +11,13 @@ from .errors import (
 )
 from .protocol import ZebraDs8178Protocol
 from .simulation import SimulatedScanner
-from .ssi import Barcode, BeepCode, Symbology
+from .ssi import Barcode, BeepCode, BeeperTone, Symbology
 
 __all__ = [
     "SCAN_ERRORS",
     "Barcode",
     "BeepCode",
+    "BeeperTone",
     "CommandRejectedError",
     "NoBarcodeDecodedError",
     "ScanStoppedError",

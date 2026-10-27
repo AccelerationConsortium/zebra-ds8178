@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and data (timeout 0.5 to 9.9 s), and `StopScan` ends a running scan early. `ScannedBarcode` streams every bar
   code read, including trigger pulls. `SetScanningEnabled` and `ScanningEnabled` turn scanning off and on, and
   `StartAiming` and `StopAiming` switch the red aiming pattern.
-- Beeper Controller: `Beep` sounds any of the scanner's 30 beep patterns.
+- Beeper Controller: `Beep` sounds any of the scanner's 30 beep patterns. `SetBeepAfterScan` turns off the beep
+  after each read while error beeps still sound, and `SetTone` sets the pitch or silences the beep after reads
+  (`Beep` and the disconnection beep are still heard). Both last until the scanner powers down.
 - Cradle Information Provider: the cradle's model, serial number, manufacture date and firmware version.
 - Simulation mode, on by default: a simulated scanner answers like the real one, so the connector runs without
   hardware. Switch at runtime with the Simulation Controller; if the real scanner cannot be reached, Start Real

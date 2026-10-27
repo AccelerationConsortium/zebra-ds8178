@@ -10,7 +10,7 @@ INTERFACE = {
         "commands": {"Scan", "StopScan", "SetScanningEnabled", "StartAiming", "StopAiming"},
         "properties": {"ScannedBarcode", "ScanningEnabled"},
     },
-    "BeeperController": {"commands": {"Beep"}, "properties": set()},
+    "BeeperController": {"commands": {"Beep", "SetBeepAfterScan", "SetTone"}, "properties": {"BeepAfterScan", "Tone"}},
     "CradleInformationProvider": {
         "commands": set(),
         "properties": {"Model", "SerialNumber", "ManufactureDate", "FirmwareVersion"},

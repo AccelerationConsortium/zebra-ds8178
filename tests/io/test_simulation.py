@@ -12,7 +12,7 @@ from unitelabs.zebra_ds8178.io import (
     SimulatedScanner,
     ZebraDs8178Protocol,
 )
-from unitelabs.zebra_ds8178.io.ssi import BeepCode, Opcode, Packet, Symbology
+from unitelabs.zebra_ds8178.io.ssi import BeepCode, BeeperTone, Opcode, Packet, Symbology
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ async def test_all_parameters_can_be_requested(simulate) -> None:
 
     reply = await protocol.request(Packet(Opcode.PARAM_REQUEST, b"\xfe"), reply=Opcode.PARAM_SEND)
 
-    assert reply == bytes.fromhex("FF EE 01 88 63 8A 00")
+    assert reply == bytes.fromhex("FF EE 01 88 63 8A 00 38 01 91 01")
 
 
 async def test_state_survives_a_mode_switch(simulate) -> None:
@@ -120,3 +120,14 @@ async def test_unknown_opcodes_get_a_bad_context_nak(simulate) -> None:
 
     with pytest.raises(CommandRejectedError, match="BAD_CONTEXT"):
         await protocol.request(Packet(Opcode.SLEEP))
+
+
+async def test_beeper_settings_start_at_the_prg_defaults_and_keep_writes(simulate) -> None:
+    """Beep after decode starts on and the tone medium; written values are read back."""
+    protocol = await simulate()
+    assert (await protocol.get_beep_after_good_decode(), await protocol.get_beeper_tone()) == (True, BeeperTone.MEDIUM)
+
+    await protocol.set_beep_after_good_decode(enabled=False)
+    await protocol.set_beeper_tone(BeeperTone.OFF)
+
+    assert (await protocol.get_beep_after_good_decode(), await protocol.get_beeper_tone()) == (False, BeeperTone.OFF)

@@ -39,8 +39,11 @@ CRADLE_ATTRIBUTES: dict[int, str] = {
     Attribute.DATE_OF_MANUFACTURE: "01JAN25",
 }
 
-DEFAULT_PARAMETERS = {238: 1, 136: 99, 138: 0}
-"""Packeted decode data, 9.9 s Decode Session Timeout and Level trigger mode, as read from a DS8178."""
+DEFAULT_PARAMETERS = {238: 1, 136: 99, 138: 0, 56: 1, 145: 1}
+"""
+Packeted decode data, 9.9 s Decode Session Timeout and Level trigger mode, as read from a DS8178, and the PRG
+defaults for Beep After Good Decode (on) and Beeper Tone (medium).
+"""
 
 
 class SimulatedScanner:

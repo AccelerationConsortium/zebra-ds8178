@@ -22,6 +22,8 @@ All features are published as `ca.accelerationconsortium/barcodereader/<Feature>
 | | ScanningEnabled, SetScanningEnabled | property, command | Whether the scanner reads bar codes at all |
 | | StartAiming, StopAiming | commands | Switch the red aiming pattern on and off |
 | Beeper Controller | Beep | command | Sound one of the 30 documented beep patterns |
+| | BeepAfterScan, SetBeepAfterScan | property, command | Turn off the beep after each read; error beeps still sound |
+| | Tone, SetTone | property, command | Set the beeper's pitch, or `off` to silence the beep after reads; Beep and the disconnection beep are still heard |
 | Cradle Information Provider | Model, SerialNumber, ManufactureDate, FirmwareVersion | properties | Identify the CR8178 cradle |
 | Simulation Controller | StartRealMode, StartSimulationMode, SimulationMode | standard SiLA | Switch between the simulated and the real scanner at runtime |
 
@@ -222,6 +224,8 @@ connector start --app unitelabs.zebra_ds8178:create_app -vvv
   what started a read.
 - The simulated scanner does not simulate trigger pulls, so ScannedBarcode only reports bar codes read by Scan in
   simulation mode.
+- The beeper settings last until the scanner powers down; they are written temporarily, so restarting the
+  connector does not reset them. Whether error beeps still sound with the tone off has not been verified.
 - Image capture, symbology settings and the other scanner parameters are not exposed.
 - The Lock Controller is registered but does not yet protect the commands.
 
@@ -293,6 +297,13 @@ uv run pytest tests/integration --serial-port /dev/cu.usbmodem1201 -s
 
 The tests read the cradle, sound one beep, flash the aiming pattern, and disable scanning only to enable it again.
 To also read a bar code, hold one in front of the scanner window and add `--with-barcode`.
+
+What only ears and eyes can confirm, Stop Scan and the beeper settings, `scripts/lab_check.py` walks through
+against a running connector in real mode, asking what you heard or saw and restoring the beeper settings at the end:
+
+```sh
+uv run python scripts/lab_check.py --port <sila port>
+```
 
 #### Dev-Mode
 

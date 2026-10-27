@@ -12,12 +12,19 @@ Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC):
 - START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies and QR codes, whose
   text arrives in the code's own encoding (UTF-8 or ISO-8859-1).
 - SCAN_ENABLE/SCAN_DISABLE; a disabled scanner NAKs START_DECODE as DENIED.
+- Temporary PARAM_SEND of Beep After Good Decode (56) and Beeper Tone (145) reaches the handheld scanner: with 56
+  off, host scans and trigger pulls are silent; with 145 off, reads are silent but a host BEEP and the Bluetooth
+  disconnection beep still sound.
+- Writing 56 or 145 is silent, whether or not the value changes; PARAM_SEND's beep code FF is honoured.
+- DECODE_DATA that is not ACKed is sent three times, the resends with the retransmit bit set (SSI guide p. 2-21).
+  Withholding the ACK also disturbs the scanner: the next trigger pull did not read, and high/low beeps followed.
 
 Known gaps, to verify on hardware:
 - The DS8178 sets bit 7 of the status byte on its replies, which the SSI guide marks as unused; it is masked off.
 - LED_ON and LED_OFF are ACKed for LED bits 0 to 2 (bit 3 is DENIED) but light no LED on the DS8178 in its
   cradle, so they are not used. The PRG's Beeper/LED attribute 6000 would reach the cradle rather than the scanner
   over USB CDC (see `rsm`), and its set command is undocumented.
+- Whether error beeps, e.g. the transmit error beep (SSI guide p. 2-26), still sound with Beeper Tone off.
 - The multipacket decode data format, string/array/multipacket parameter replies and the symbology IDs beyond the
   six sampled ones follow the SSI guide only.
 """
@@ -153,6 +160,23 @@ class BeepCode(enum.IntEnum):
     SHORT_HIGH_13 = 0x1B
     HIGH_CLICK = 0x1C
     LOW_CLICK = 0x1D
+
+
+class BeeperTone(enum.IntEnum):
+    """
+    Values of the Beeper Tone parameter, 145 (PRG p. 6-10).
+
+    OFF silences the scanner's beep after a read; on hardware a host BEEP and the Bluetooth disconnection beep still
+    sound.
+    """
+
+    HIGH = 0
+    MEDIUM = 1
+    """The default."""
+    LOW = 2
+    OFF = 3
+    MEDIUM_TO_HIGH = 4
+    """A two-tone beep."""
 
 
 NO_BEEP = 0xFF

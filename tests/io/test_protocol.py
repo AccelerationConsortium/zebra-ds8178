@@ -22,7 +22,7 @@ from unitelabs.zebra_ds8178.io import (
 )
 from unitelabs.zebra_ds8178.io import protocol as protocol_module
 from unitelabs.zebra_ds8178.io import ssi
-from unitelabs.zebra_ds8178.io.ssi import BeepCode, NakCause, Opcode, Packet, Source, Status
+from unitelabs.zebra_ds8178.io.ssi import BeepCode, BeeperTone, NakCause, Opcode, Packet, Source, Status
 
 # Captured from a DS8178: REPLY_REVISION and a decoder CMD_ACK (the scanner sets the undocumented status bit 7).
 REVISION_REPLY = bytes.fromhex(
@@ -316,6 +316,46 @@ async def test_a_refused_aim_is_reported(connect) -> None:
 
     with pytest.raises(CommandRejectedError, match="AIM_ON.*DENIED"):
         await protocol.aim_on()
+
+
+# - Beeper settings ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("call", "data"),
+    [
+        (lambda protocol: protocol.set_beep_after_good_decode(enabled=False), "FF 38 00"),
+        (lambda protocol: protocol.set_beep_after_good_decode(enabled=True), "FF 38 01"),
+        (lambda protocol: protocol.set_beeper_tone(BeeperTone.OFF), "FF 91 03"),
+        (lambda protocol: protocol.set_beeper_tone(BeeperTone.MEDIUM), "FF 91 01"),
+    ],
+)
+async def test_beeper_settings_are_written_temporarily_without_a_beep(connect, call, data: str) -> None:
+    """Parameters 56 and 145 go out with the permanent bit clear, so nothing wears the scanner's memory."""
+    scanner = FakeScanner({Opcode.PARAM_SEND: [ACK]})
+    protocol = await connect(scanner)
+
+    await call(protocol)
+
+    assert scanner.received == [Packet(Opcode.PARAM_SEND, bytes.fromhex(data), status=Status.NONE)]
+
+
+async def test_beeper_settings_are_read_back_from_the_scanner(connect) -> None:
+    """The values come from PARAM_REQUEST, not from what the connector last wrote."""
+    replies = [PACKETED, decoder(Opcode.PARAM_SEND, bytes.fromhex("FF 38 00")), decoder(Opcode.PARAM_SEND, bytes.fromhex("FF 91 03"))]
+    protocol = await connect(FakeScanner({Opcode.PARAM_REQUEST: replies}))
+
+    assert await protocol.get_beep_after_good_decode() is False
+    assert await protocol.get_beeper_tone() is BeeperTone.OFF
+
+
+@pytest.mark.parametrize(("reply", "match"), [("FF 91 07", "tone 7"), ("FF", "parameter 145")])
+async def test_an_unknown_or_missing_tone_is_unexpected(connect, reply: str, match: str) -> None:
+    """A value the PRG does not list, or no value at all, is reported instead of guessed."""
+    protocol = await connect(FakeScanner({Opcode.PARAM_REQUEST: [PACKETED, decoder(Opcode.PARAM_SEND, bytes.fromhex(reply))]}))
+
+    with pytest.raises(UnexpectedResponseError, match=match):
+        await protocol.get_beeper_tone()
 
 
 # - Scanning --------------------------------------------------------------------------------------------------------

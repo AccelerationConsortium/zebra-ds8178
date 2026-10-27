@@ -4,8 +4,8 @@ Checks against a real DS8178 on its CR8178 cradle; skipped unless run with `--se
     uv run pytest tests/integration --serial-port /dev/cu.usbmodem1201 -s
     uv run pytest tests/integration --serial-port /dev/cu.usbmodem1201 -s --with-barcode   # also reads a bar code
 
-Nothing here changes the scanner for good: the tests read, beep, switch the aiming pattern on and off, and disable
-scanning only to enable it again. Put the scanner in "SSI over USB CDC" mode first (Product Reference Guide p. 8-6).
+Nothing here changes the scanner for good: the tests read, beep, switch the aiming pattern on and off, disable
+scanning only to enable it again, and change the beeper settings temporarily before restoring them. Put the scanner in "SSI over USB CDC" mode first (Product Reference Guide p. 8-6).
 """
 
 import asyncio
@@ -14,7 +14,7 @@ import datetime
 import pytest
 
 from unitelabs.zebra_ds8178.io import CommandRejectedError, ScanStoppedError, Symbology, ZebraDs8178Protocol
-from unitelabs.zebra_ds8178.io.ssi import BeepCode
+from unitelabs.zebra_ds8178.io.ssi import BeepCode, BeeperTone
 
 
 async def test_connecting_leaves_packeted_decode_data_set(scanner: ZebraDs8178Protocol) -> None:
@@ -39,6 +39,21 @@ async def test_beep_and_aiming_are_acknowledged(scanner: ZebraDs8178Protocol) ->
     await scanner.beep(BeepCode.SHORT_HIGH_1)
     await scanner.aim_on()
     await scanner.aim_off()
+
+
+async def test_beeper_settings_are_read_back_and_restored(scanner: ZebraDs8178Protocol) -> None:
+    """The temporary writes reach the scanner if the scanner reports them back; the original values are restored."""
+    beep_after_scan, tone = await scanner.get_beep_after_good_decode(), await scanner.get_beeper_tone()
+    print(f"before: beep after scan={beep_after_scan} tone={tone.name}")
+    try:
+        await scanner.set_beep_after_good_decode(enabled=not beep_after_scan)
+        await scanner.set_beeper_tone(BeeperTone.OFF if tone is not BeeperTone.OFF else BeeperTone.MEDIUM)
+
+        assert await scanner.get_beep_after_good_decode() is (not beep_after_scan)
+        assert (await scanner.get_beeper_tone() is BeeperTone.OFF) is (tone is not BeeperTone.OFF)
+    finally:
+        await scanner.set_beep_after_good_decode(enabled=beep_after_scan)
+        await scanner.set_beeper_tone(tone)
 
 
 async def test_a_disabled_scanner_refuses_a_session(scanner: ZebraDs8178Protocol) -> None:
