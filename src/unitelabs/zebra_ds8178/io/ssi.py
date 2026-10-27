@@ -9,8 +9,11 @@ Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC):
   first request after the port opens.
 - REQUEST_REVISION, BEEP, and AIM_ON/AIM_OFF, which switch the red aiming pattern.
 - PARAM_REQUEST with byte values and F0/F1 parameter numbers, and PARAM_SEND.
-- START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies and QR codes, whose
-  text arrives in the code's own encoding (UTF-8 or ISO-8859-1).
+- START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies, QR codes, whose text
+  arrives in the code's own encoding (UTF-8 or ISO-8859-1), and Data Matrix. A Data Matrix carrying GS1 data
+  was reported as Data Matrix (0x1B), not GS1 Data Matrix (0xC1), with its GS (0x1D) field separators kept.
+- DECODE_DATA split over several packets by the continuation bit, e.g. a 1500-character QR code, joined with the
+  repeated bar code type dropped.
 - SCAN_ENABLE/SCAN_DISABLE; a disabled scanner NAKs START_DECODE as DENIED.
 - Temporary PARAM_SEND of Beep After Good Decode (56) and Beeper Tone (145) reaches the handheld scanner: with 56
   off, host scans and trigger pulls are silent; with 145 off, reads are silent but a host BEEP and the Bluetooth
@@ -25,8 +28,8 @@ Known gaps, to verify on hardware:
   cradle, so they are not used. The PRG's Beeper/LED attribute 6000 would reach the cradle rather than the scanner
   over USB CDC (see `rsm`), and its set command is undocumented.
 - Whether error beeps, e.g. the transmit error beep (SSI guide p. 2-26), still sound with Beeper Tone off.
-- The multipacket decode data format, string/array/multipacket parameter replies and the symbology IDs beyond the
-  six sampled ones follow the SSI guide only.
+- The multipacket decode data format (bar code type 0x99, e.g. structured append), string/array/multipacket
+  parameter replies and the symbology IDs beyond the sampled ones follow the SSI guide only.
 """
 
 import dataclasses

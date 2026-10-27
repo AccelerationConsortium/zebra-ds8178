@@ -6,9 +6,11 @@ UniteLabs CDK. It talks to the scanner through the cradle's USB serial port with
 
 ## Status
 
-Scanning, the beeper, the aiming pattern, enabling and disabling scanning, and reading the cradle's identity are
-implemented, tested against the simulated scanner, and checked on a DS8178 with a CR8178-SC cradle. The hardware
-checks are in `tests/integration`; see [Checking a real scanner](#checking-a-real-scanner).
+Scanning, Stop Scan, the beeper and its settings, the aiming pattern, enabling and disabling scanning, and reading
+the cradle's identity are implemented, tested against the simulated scanner, and checked on a DS8178 with a CR8178-SC
+cradle. Checked on hardware as well: 1D codes, QR codes up to 1500 characters in UTF-8 or ISO-8859-1, Data Matrix,
+two clients scanning at once, and recovery after the cradle is unplugged and plugged back in. The hardware checks are
+in `tests/integration`; see [Checking a real scanner](#checking-a-real-scanner).
 
 ## Features
 
@@ -226,6 +228,9 @@ connector start --app unitelabs.zebra_ds8178:create_app -vvv
   simulation mode.
 - The beeper settings last until the scanner powers down; they are written temporarily, so restarting the
   connector does not reset them. Whether error beeps still sound with the tone off has not been verified.
+- GS1 data keeps its field separator, the GS character (0x1D), in `Data`; some clients, the SiLA Browser among
+  them, do not display it. A GS1 Data Matrix may be reported as `data matrix`, so recognise GS1 data by its
+  content rather than by its symbology.
 - Image capture, symbology settings and the other scanner parameters are not exposed.
 - The Lock Controller is registered but does not yet protect the commands.
 
