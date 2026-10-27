@@ -231,3 +231,28 @@ def test_rejects_a_truncated_parameter_request() -> None:
     """A page prefix without its number is reported."""
     with pytest.raises(UnexpectedResponseError, match="truncated"):
         parse_param_request(frame("EE F0"))
+
+
+# QR codes with "µ" and "°" scanned on hardware: the scanner passes each code's own encoding through.
+QR_LATIN_1 = (
+    "1C 48 65 6C 6C 6F 2C 20 68 6F 77 20 61 72 65 20 79 6F 75 2E 20 49 20 68 61 76 65 20 32 30 20 B5 6C 2E 20 54 68 "
+    "69 73 20 69 73 20 61 62 6F 75 74 20 31 30 30 B0 43 20 6F 72 20 61 62 6F 75 74 20 37 32 B0 46 2E 20"
+)
+QR_UTF_8 = (
+    "1C 48 65 6C 6C 6F 2C 20 68 6F 77 20 61 72 65 20 79 6F 75 2E 20 49 20 68 61 76 65 20 32 30 20 C2 B5 6C 2E 20 54 "
+    "68 69 73 20 69 73 20 61 62 6F 75 74 20 31 30 30 C2 B0 43 20 6F 72 20 61 62 6F 75 74 20 37 32 C2 B0 46 2E 20"
+)
+
+
+@pytest.mark.parametrize("data", [QR_LATIN_1, QR_UTF_8], ids=["iso-8859-1", "utf-8"])
+def test_decodes_qr_text_in_either_encoding_the_scanner_passes_through(data: str) -> None:
+    """Both captured QR codes read as the same text, without replacement characters."""
+    decoded = parse_decode_data(frame(data))
+
+    assert decoded.symbology is Symbology.QR_CODE
+    assert decoded.data == "Hello, how are you. I have 20 µl. This is about 100°C or about 72°F. "
+
+
+def test_keeps_the_gs1_group_separator() -> None:
+    """GS1 data keeps its 0x1D field separator, which clients need to split the application identifiers."""
+    assert parse_decode_data(frame("0F 30 31 31 32 33 1D 31 30 41 42")).data == "01123\x1d10AB"

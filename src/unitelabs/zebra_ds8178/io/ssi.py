@@ -9,7 +9,8 @@ Verified on hardware (DS8178 on a CR8178 cradle, SSI over USB CDC):
   first request after the port opens.
 - REQUEST_REVISION, BEEP, and AIM_ON/AIM_OFF, which switch the red aiming pattern.
 - PARAM_REQUEST with byte values and F0/F1 parameter numbers, and PARAM_SEND.
-- START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies.
+- START_DECODE, STOP_DECODE, and DECODE_DATA for the six Appendix F sample symbologies and QR codes, whose
+  text arrives in the code's own encoding (UTF-8 or ISO-8859-1).
 - SCAN_ENABLE/SCAN_DISABLE; a disabled scanner NAKs START_DECODE as DENIED.
 
 Known gaps, to verify on hardware:
@@ -401,8 +402,11 @@ def parse_decode_data(data: bytes) -> Barcode:
     `<spare> <length high> <length low> <bytes...>` (SSI guide table 2-36); the segments are joined in order, which
     for structured append places the control block after the main data. Not verified on hardware.
 
-    The SSI guide calls the data "ASCII" (p. 2-28), but 2D codes may carry UTF-8 and GS1 codes carry the GS (0x1D)
-    separator; it is decoded as UTF-8, which covers both, with invalid bytes replaced rather than dropped.
+    The SSI guide calls the data "ASCII" (p. 2-28), but the DS8178 passes a bar code's bytes through unchanged: on
+    hardware, a QR code with "µ" arrived as UTF-8 (`C2 B5`) from one generator and as ISO-8859-1 (`B5`), the QR
+    default, from another. The data is therefore decoded as UTF-8 when it is valid UTF-8 and as ISO-8859-1
+    otherwise, which never fails. ISO-8859-1 text that happens to be valid UTF-8, such as "Ã©", would be misread;
+    that takes two specific accented characters in a row and is accepted. The GS1 separator (0x1D) is kept.
 
     Raises:
       UnexpectedResponseError: If the data is empty or a multipacket segment is truncated.
@@ -606,4 +610,7 @@ def _read(data: bytes, position: int, length: int) -> bytes:
 
 
 def _decode_text(data: bytes) -> str:
-    return data.decode("utf-8", errors="replace")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("latin-1")
