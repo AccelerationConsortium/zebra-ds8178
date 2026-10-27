@@ -1,9 +1,11 @@
 """Calls through a real local SiLA server with the `sila.client` client, as GroundControl or a script would make them."""
 
+import asyncio
 import datetime
 
 import pytest
 
+from unitelabs.zebra_ds8178.io import SimulatedScanner
 from unitelabs.zebra_ds8178.io import protocol as protocol_module
 
 SIMULATION_CONTROLLER = "org.silastandard/core/SimulationController/v1"
@@ -56,6 +58,20 @@ async def test_scan_while_disabled_reports_the_defined_error(serve) -> None:
 
     assert enabled is False
     assert type(error.value).__name__ == "ScanningDisabledError"
+
+
+async def test_stop_scan_ends_a_running_scan_with_the_defined_error(serve, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second client call ends a long Scan; the first receives ScanStoppedError by name."""
+    monkeypatch.setattr(protocol_module, "SimulatedScanner", lambda: SimulatedScanner(barcode_present=False))
+    async with serve() as client:
+        execution = await client.get_observable_command(f"{BARCODE_READER}/Command/Scan").execute({"Timeout": 9.9})
+        await asyncio.sleep(0.2)
+
+        await client.get_unobservable_command(f"{BARCODE_READER}/Command/StopScan").execute({})
+
+        with pytest.raises(Exception, match="stopped with Stop Scan") as error:
+            await asyncio.wait_for(wait_for_responses(execution), timeout=3)
+    assert type(error.value).__name__ == "ScanStoppedError"
 
 
 async def test_beep_and_aiming_complete(serve) -> None:

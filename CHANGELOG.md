@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SiLA 2 connector for the Zebra DS8178 barcode scanner on its CR8178 cradle, connected over USB with the scanner
   in "SSI over USB CDC" mode. The cradle's serial port is found automatically, or can be set with `serial_port`.
 - Barcode Reader Controller: `Scan` reads one bar code, as if the trigger were pulled, and returns its symbology
-  and data (timeout 0.5 to 9.9 s, cancellable). `ScannedBarcode` streams every bar code read, including trigger
-  pulls. `SetScanningEnabled` and `ScanningEnabled` turn scanning off and on, and `StartAiming` and `StopAiming`
-  switch the red aiming pattern.
+  and data (timeout 0.5 to 9.9 s), and `StopScan` ends a running scan early. `ScannedBarcode` streams every bar
+  code read, including trigger pulls. `SetScanningEnabled` and `ScanningEnabled` turn scanning off and on, and
+  `StartAiming` and `StopAiming` switch the red aiming pattern.
 - Beeper Controller: `Beep` sounds any of the scanner's 30 beep patterns.
 - Cradle Information Provider: the cradle's model, serial number, manufacture date and firmware version.
 - Simulation mode, on by default: a simulated scanner answers like the real one, so the connector runs without

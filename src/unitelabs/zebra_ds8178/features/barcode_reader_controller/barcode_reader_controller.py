@@ -3,14 +3,7 @@ import typing_extensions as typing
 from unitelabs.cdk import sila
 
 from ...constants import CATEGORY, MAX_SCAN_TIMEOUT, MIN_SCAN_TIMEOUT, ORIGINATOR
-from ...io import (
-    Barcode,
-    NoBarcodeDecodedError,
-    ScannerBusyError,
-    ScannerNotRespondingError,
-    ScanningDisabledError,
-    ZebraDs8178Protocol,
-)
+from ...io import SCAN_ERRORS, Barcode, ScannerNotRespondingError, ZebraDs8178Protocol
 from ...io.units import SECOND
 
 ScanTimeout = typing.Annotated[
@@ -34,15 +27,13 @@ class BarcodeReaderController(sila.Feature):
         super().__init__(originator=ORIGINATOR, category=CATEGORY)
         self.protocol = protocol
 
-    @sila.ObservableCommand(
-        errors=[ScanningDisabledError, ScannerBusyError, NoBarcodeDecodedError, ScannerNotRespondingError]
-    )
+    @sila.ObservableCommand(errors=SCAN_ERRORS)
     async def scan(self, timeout: ScanTimeout) -> Barcode:
         """
         Read one bar code, as if the trigger were pulled, and return it.
 
         The scanner reads until it decodes a bar code or the timeout passes. A bar code read by pulling the trigger
-        during that time is returned as well. Cancelling the command stops the read.
+        during that time is returned as well. Stop Scan ends the read early.
 
         Args:
           Timeout: How long to try to read a bar code.
@@ -51,6 +42,15 @@ class BarcodeReaderController(sila.Feature):
           Barcode: The bar code read.
         """
         return await self.protocol.scan(timeout)
+
+    @sila.UnobservableCommand()
+    async def stop_scan(self) -> None:
+        """
+        Stop a running Scan, which then ends with ScanStoppedError; does nothing when no scan is running.
+
+        Returns once the scanner has stopped reading.
+        """
+        await self.protocol.stop_scan()
 
     @sila.ObservableProperty()
     async def subscribe_scanned_barcode(self) -> sila.Stream[Barcode]:

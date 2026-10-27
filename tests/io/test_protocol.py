@@ -14,6 +14,7 @@ from unitelabs.zebra_ds8178.io import (
     NoBarcodeDecodedError,
     ScannerBusyError,
     ScanningDisabledError,
+    ScanStoppedError,
     ScannerNotRespondingError,
     SerialPortNotFoundError,
     UnexpectedResponseError,
@@ -412,6 +413,32 @@ async def test_a_refused_session_start_is_reported(connect) -> None:
 
     with pytest.raises(CommandRejectedError, match="START_DECODE.*DENIED"):
         await protocol.scan(timeout=1)
+
+
+async def test_stop_scan_ends_a_running_scan_and_stops_the_session(connect) -> None:
+    """Stop Scan returns once the scan has sent STOP_DECODE; the scan ends with ScanStoppedError, not a timeout."""
+    scanner = FakeScanner({Opcode.START_DECODE: [ACK], Opcode.STOP_DECODE: [ACK]})
+    protocol = await connect(scanner)
+    scan = asyncio.create_task(protocol.scan(timeout=5))
+    await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(protocol.stop_scan(), timeout=1)
+
+    assert scan.done()
+    with pytest.raises(ScanStoppedError):
+        await scan
+    assert scanner.opcodes() == [Opcode.START_DECODE, Opcode.STOP_DECODE]
+
+
+async def test_stop_scan_without_a_running_scan_does_nothing(connect) -> None:
+    """Stopping is idempotent: nothing is sent, and a later scan is not stopped by the earlier request."""
+    scanner = FakeScanner({Opcode.START_DECODE: [[ACK, UPC_E]]})
+    protocol = await connect(scanner)
+
+    await protocol.stop_scan()
+
+    assert scanner.received == []
+    assert (await protocol.scan(timeout=1)).data == "04252614"
 
 
 async def test_decodes_yields_trigger_scans_and_skips_events(connect) -> None:

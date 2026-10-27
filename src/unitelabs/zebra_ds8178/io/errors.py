@@ -68,3 +68,21 @@ class NoBarcodeDecodedError(Exception):
     not damaged. Below 3% battery the scanner stops scanning (Product Reference Guide p. 1-8); leave it in the cradle
     to charge, then retry.
     """
+
+
+class ScanStoppedError(Exception):
+    """
+    The scan was stopped with Stop Scan before a bar code was read.
+
+    Start a new scan when the bar code is in front of the scanner.
+    """
+
+
+SCAN_ERRORS = [
+    ScanningDisabledError,
+    ScannerBusyError,
+    NoBarcodeDecodedError,
+    ScanStoppedError,
+    ScannerNotRespondingError,
+]
+"""Errors a scan can raise, in the order its preconditions are checked, then how it can end without a bar code."""

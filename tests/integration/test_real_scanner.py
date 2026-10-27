@@ -8,11 +8,12 @@ Nothing here changes the scanner for good: the tests read, beep, switch the aimi
 scanning only to enable it again. Put the scanner in "SSI over USB CDC" mode first (Product Reference Guide p. 8-6).
 """
 
+import asyncio
 import datetime
 
 import pytest
 
-from unitelabs.zebra_ds8178.io import CommandRejectedError, Symbology, ZebraDs8178Protocol
+from unitelabs.zebra_ds8178.io import CommandRejectedError, ScanStoppedError, Symbology, ZebraDs8178Protocol
 from unitelabs.zebra_ds8178.io.ssi import BeepCode
 
 
@@ -48,6 +49,17 @@ async def test_a_disabled_scanner_refuses_a_session(scanner: ZebraDs8178Protocol
             await scanner.start_decode()
     finally:
         await scanner.scan_enable()
+
+
+async def test_stop_scan_ends_a_read(scanner: ZebraDs8178Protocol) -> None:
+    """Keep bar codes away: the scanner's illumination should go off after about a second, not after 9.9 s."""
+    scan = asyncio.create_task(scanner.scan(timeout=9.9))
+    await asyncio.sleep(1)
+
+    await scanner.stop_scan()
+
+    with pytest.raises(ScanStoppedError):
+        await scan
 
 
 async def test_scan_reads_the_bar_code_in_front(scanner: ZebraDs8178Protocol, barcode: None) -> None:

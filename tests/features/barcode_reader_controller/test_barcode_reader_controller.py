@@ -5,7 +5,14 @@ import asyncio
 import pytest
 
 from unitelabs.zebra_ds8178.features import BarcodeReaderController
-from unitelabs.zebra_ds8178.io import Barcode, NoBarcodeDecodedError, ScanningDisabledError, SimulatedScanner, Symbology
+from unitelabs.zebra_ds8178.io import (
+    Barcode,
+    NoBarcodeDecodedError,
+    ScanningDisabledError,
+    ScanStoppedError,
+    SimulatedScanner,
+    Symbology,
+)
 
 
 async def test_scan_returns_the_bar_code_read(simulated) -> None:
@@ -21,6 +28,18 @@ async def test_scan_without_a_bar_code_reports_it(simulated) -> None:
 
     with pytest.raises(NoBarcodeDecodedError):
         await controller.scan(timeout=0.5)
+
+
+async def test_stop_scan_ends_a_running_scan(simulated) -> None:
+    """A client waiting on a long Scan can end it; the scan reports that it was stopped."""
+    controller = BarcodeReaderController(await simulated(SimulatedScanner(barcode_present=False)))
+    scan = asyncio.create_task(controller.scan(timeout=9.9))
+    await asyncio.sleep(0.05)
+
+    await controller.stop_scan()
+
+    with pytest.raises(ScanStoppedError):
+        await asyncio.wait_for(scan, timeout=1)
 
 
 async def test_scanning_can_be_disabled_and_enabled(simulated) -> None:
@@ -77,10 +96,12 @@ def test_endpoints_declare_the_errors_a_client_can_react_to(registered) -> None:
 
     assert sorted(controller.commands["Scan"].errors) == [
         "NoBarcodeDecodedError",
+        "ScanStoppedError",
         "ScannerBusyError",
         "ScannerNotRespondingError",
         "ScanningDisabledError",
     ]
+    assert not controller.commands["StopScan"].errors
     for name in ("SetScanningEnabled", "StartAiming", "StopAiming"):
         assert list(controller.commands[name].errors) == ["ScannerNotRespondingError"]
     assert not controller.properties["ScanningEnabled"].errors

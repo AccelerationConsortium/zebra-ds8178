@@ -16,7 +16,8 @@ All features are published as `ca.accelerationconsortium/barcodereader/<Feature>
 
 | Feature | Endpoint | Kind | What it does |
 | --- | --- | --- | --- |
-| Barcode Reader Controller | Scan | observable command | Read one bar code, as if the trigger were pulled, and return its symbology and data; timeout 0.5 to 9.9 s; cancellable |
+| Barcode Reader Controller | Scan | observable command | Read one bar code, as if the trigger were pulled, and return its symbology and data; timeout 0.5 to 9.9 s |
+| | StopScan | command | End a running Scan early; Scan then reports `ScanStoppedError` |
 | | ScannedBarcode | observable property | Every bar code read from now on, by Scan or by pulling the trigger |
 | | ScanningEnabled, SetScanningEnabled | property, command | Whether the scanner reads bar codes at all |
 | | StartAiming, StopAiming | commands | Switch the red aiming pattern on and off |
@@ -25,7 +26,7 @@ All features are published as `ca.accelerationconsortium/barcodereader/<Feature>
 | Simulation Controller | StartRealMode, StartSimulationMode, SimulationMode | standard SiLA | Switch between the simulated and the real scanner at runtime |
 
 Scan refuses with `ScanningDisabledError` while scanning is disabled and with `ScannerBusyError` while another scan
-runs, and reports `NoBarcodeDecodedError` when the timeout passes. Endpoints that talk to the scanner report
+runs, and reports `NoBarcodeDecodedError` when the timeout passes or `ScanStoppedError` when Stop Scan ended it. Endpoints that talk to the scanner report
 `ScannerNotRespondingError` when it does not answer.
 
 ## Connect to the real scanner

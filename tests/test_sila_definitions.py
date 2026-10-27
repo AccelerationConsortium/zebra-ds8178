@@ -7,7 +7,7 @@ FEATURE = "ca.accelerationconsortium/barcodereader/{}/v1"
 
 INTERFACE = {
     "BarcodeReaderController": {
-        "commands": {"Scan", "SetScanningEnabled", "StartAiming", "StopAiming"},
+        "commands": {"Scan", "StopScan", "SetScanningEnabled", "StartAiming", "StopAiming"},
         "properties": {"ScannedBarcode", "ScanningEnabled"},
     },
     "BeeperController": {"commands": {"Beep"}, "properties": set()},

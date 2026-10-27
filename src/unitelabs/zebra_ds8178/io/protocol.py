@@ -15,6 +15,7 @@ from .errors import (
     ScannerBusyError,
     ScannerNotRespondingError,
     ScanningDisabledError,
+    ScanStoppedError,
     SerialPortNotFoundError,
     UnexpectedResponseError,
 )
@@ -67,6 +68,7 @@ class ZebraDs8178Protocol(Protocol):
         self._listeners: set[asyncio.Queue[Packet]] = set()
         self._scanning_enabled = True
         self._scan_lock = asyncio.Lock()
+        self._stop_requested = asyncio.Event()
         self._rsm_ready = False
 
     async def open_device(self) -> None:
@@ -232,9 +234,9 @@ class ZebraDs8178Protocol(Protocol):
         The subscription opens before START_DECODE is sent, so decode data arriving ahead of the ACK is not missed;
         a bar code read by a trigger pull during the session counts as well. The SSI guide requires the Host trigger
         mode for START_DECODE (p. 2-65), which the DS8178 does not list; on hardware it is accepted in the default
-        Level mode, and refused as DENIED while scanning is disabled. The session is stopped when `timeout` passes or
-        the scan is cancelled. The scanner also ends it after its own Decode Session Timeout, so `timeout` must not
-        exceed it (see `MAX_SCAN_TIMEOUT`).
+        Level mode, and refused as DENIED while scanning is disabled. The session is stopped when `timeout` passes,
+        `stop_scan` is called or the task is cancelled; a bar code read at the same moment wins. The scanner also
+        ends it after its own Decode Session Timeout, so `timeout` must not exceed it (see `MAX_SCAN_TIMEOUT`).
 
         Args:
           timeout: How long to wait for a bar code, in seconds.
@@ -243,6 +245,7 @@ class ZebraDs8178Protocol(Protocol):
           ScanningDisabledError: If scanning is disabled.
           ScannerBusyError: If another scan is in progress.
           NoBarcodeDecodedError: If no bar code is decoded within `timeout`.
+          ScanStoppedError: If `stop_scan` ended the scan first.
           ScannerNotRespondingError: If the scanner does not answer.
           CommandRejectedError: If the scanner refuses to start the session.
         """
@@ -254,17 +257,39 @@ class ZebraDs8178Protocol(Protocol):
             raise ScannerBusyError(msg)
 
         async with self._scan_lock:
+            self._stop_requested.clear()
             with self.listen() as messages:
                 await self.start_decode()
+                decode = asyncio.ensure_future(self._next_decode(messages))
+                stop = asyncio.ensure_future(self._stop_requested.wait())
                 try:
-                    return await asyncio.wait_for(self._next_decode(messages), timeout=timeout)
-                except TimeoutError:
-                    await self._stop_decode_quietly()
-                    msg = f"No bar code was decoded within {timeout:g} s."
-                    raise NoBarcodeDecodedError(msg) from None
+                    done, _ = await asyncio.wait({decode, stop}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
                 except BaseException:
                     await self._stop_decode_quietly()
                     raise
+                finally:
+                    decode.cancel()
+                    stop.cancel()
+
+                if decode in done:
+                    return decode.result()
+                await self._stop_decode_quietly()
+                if stop in done:
+                    msg = "The scan was stopped with Stop Scan before a bar code was read."
+                    raise ScanStoppedError(msg)
+                msg = f"No bar code was decoded within {timeout:g} s."
+                raise NoBarcodeDecodedError(msg)
+
+    async def stop_scan(self) -> None:
+        """
+        Stop a running `scan` and return once it has ended; does nothing when no scan is running.
+
+        The scan sends STOP_DECODE and raises ScanStoppedError, unless it read a bar code at the same moment.
+        """
+        if self._scan_lock.locked():
+            self._stop_requested.set()
+            async with self._scan_lock:
+                pass  # held by the scan until it has stopped the decode session
 
     async def decodes(self) -> collections.abc.AsyncIterator[Barcode]:
         """Yield every bar code the scanner decodes from now on, by trigger pull, presentation or `scan`."""
