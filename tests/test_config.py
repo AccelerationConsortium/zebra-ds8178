@@ -1,5 +1,8 @@
 """Connector configuration defaults and validation."""
 
+import json
+import pathlib
+
 from unitelabs.zebra_ds8178.config import ZebraDs8178Config
 
 
@@ -21,3 +24,12 @@ def test_accepts_an_explicit_serial_port() -> None:
 def test_server_type_names_the_instrument_class() -> None:
     """The SiLA server type is the instrument class, not the template's."""
     assert ZebraDs8178Config.validate({}).sila_server.type == "BarcodeReader"
+
+
+def test_example_config_matches_the_defaults() -> None:
+    """The example config in the repository shows every setting at its default."""
+    example = json.loads((pathlib.Path(__file__).parents[1] / "config" / "zebra_ds8178_config.example.json").read_text())
+    defaults = ZebraDs8178Config().to_dict()
+    defaults["sila_server"].pop("uuid")  # left out of the example: every installation needs its own
+
+    assert example == defaults

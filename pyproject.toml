@@ -1,7 +1,7 @@
 [project]
 name = "unitelabs-zebra-ds8178"
 version = "0.1.0"
-description = "A SiLA2 connector for the Zebra DS8178 Digital Scanner"
+description = "A SiLA 2 connector for the Zebra DS8178 cordless 1D/2D barcode scanner and its cradle."
 readme = "README.md"
 authors = [{name = "Acceleration Consortium", email = "developers@accelerationconsortium.ca"},]
 maintainers = [
@@ -30,8 +30,8 @@ dependencies=[
 
 [project.urls]
 repository = "https://github.com/AccelerationConsortium/zebra-ds8178"
-documentation = "https://github.com/AccelerationConsortium/zebra-ds8178/-/README.md"
-"Bug Tracker" = "https://github.com/AccelerationConsortium/zebra-ds8178/-/issues"
+documentation = "https://github.com/AccelerationConsortium/zebra-ds8178/blob/main/README.md"
+"Bug Tracker" = "https://github.com/AccelerationConsortium/zebra-ds8178/issues"
 
 [project.optional-dependencies]
 test = [

@@ -7,7 +7,7 @@ Run from the same folder as ssi_test.py.
 """
 import serial
 
-from ssi_test import CMD_ACK, build_packet, describe, find_port, read_packet, send
+from scripts.ssi_test import CMD_ACK, build_packet, describe, find_port, read_packet, send
 
 PARAM_SEND = 0xC6
 STATUS_PERMANENT = 0x08   # status bit 3: store permanently (vs. until power-down)

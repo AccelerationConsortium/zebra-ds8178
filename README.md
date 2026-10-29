@@ -153,6 +153,23 @@ The file that is created will be populated with default configuration values tha
 
 Note: The `cloud_server_endpoint` values are only necessary if you want to use the connector with the UniteLabs platform.
 
+[`config/zebra_ds8178_config.example.json`](config/zebra_ds8178_config.example.json) shows every setting with its
+default. Copy it to `config.json` to start from it; `config.json` itself is ignored by git. The connector's own
+settings:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `serial_port` | `null` | Serial port of the cradle, e.g. `/dev/ttyACM0`, `/dev/cu.usbmodem14101` or `COM3`; empty finds the Zebra cradle by its USB ID |
+| `simulation_mode` | `true` | Start with the simulated scanner |
+
+To list the serial ports on this machine, run:
+
+```sh
+uv run python -m unitelabs.bus.utils.device_manager_cli
+```
+
+Note: with unitelabs-cdk 0.16, `config show` fails on `sila_server.version`; read the example file instead.
+
 #### Verify the Installation
 
 After installation, you can verify that everything works by starting the connector using the CLI tool included in the dependencies:

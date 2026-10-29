@@ -1,0 +1,29 @@
+{
+  "sila_server": {
+    "hostname": "0.0.0.0",
+    "port": 0,
+    "tls": false,
+    "require_client_auth": false,
+    "root_certificates": null,
+    "certificate_chain": null,
+    "private_key": null,
+    "options": {},
+    "name": "Zebra DS8178",
+    "type": "BarcodeReader",
+    "description": "A SiLA 2 connector for the Zebra DS8178 cordless 1D/2D barcode scanner and its cradle.",
+    "vendor_url": "https://unitelabs.io/",
+    "default_lifetime": 3600.0
+  },
+  "cloud_servers": {
+    "enabled": true,
+    "endpoints": []
+  },
+  "discovery": {
+    "ip_version": "ipv4",
+    "network_interfaces": null,
+    "certificate": null
+  },
+  "logging": null,
+  "serial_port": null,
+  "simulation_mode": true
+}

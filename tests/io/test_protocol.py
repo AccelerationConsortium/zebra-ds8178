@@ -137,6 +137,27 @@ async def test_open_device_reports_a_silent_scanner(monkeypatch: pytest.MonkeyPa
         await protocol.open_device()
 
 
+async def test_reconnect_to_a_silent_scanner_does_not_hang(connect) -> None:
+    """The bus reconnects through `open` after a lost connection; a scanner that never answers ends it in time."""
+    scanner = FakeScanner()
+    protocol = await connect(scanner)
+    protocol.reconnect_delay = 0.01
+    scanner.replies = {}  # the scanner no longer answers anything
+    tasks_before = asyncio.all_tasks()
+
+    protocol.connection_lost(ConnectionError("cable unplugged"))
+    await asyncio.sleep(0.05)
+    (reconnect,) = [
+        task
+        for task in asyncio.all_tasks() - tasks_before
+        if task.get_coro().__qualname__ == "ZebraDs8178Protocol.open"
+    ]
+    await asyncio.wait({reconnect}, timeout=2)
+
+    assert reconnect.done(), "the reconnect is still waiting for a scanner that never answers"
+    assert isinstance(reconnect.exception(), TimeoutError)
+
+
 async def test_open_device_reports_a_port_that_cannot_be_opened(monkeypatch: pytest.MonkeyPatch) -> None:
     """An OS error opening the port becomes SerialPortNotFoundError with the port in the message."""
 
@@ -495,6 +516,41 @@ async def test_decodes_yields_trigger_scans_and_skips_events(connect) -> None:
     assert (await first).data == "04252614"
     assert (await anext(iterator)).symbology is ssi.Symbology.CODE_128
     await iterator.aclose()
+
+
+@pytest.mark.parametrize(
+    "end",
+    [
+        pytest.param(lambda protocol: protocol.close(), id="closed"),
+        pytest.param(lambda protocol: protocol.connection_lost(ConnectionError("cable unplugged")), id="lost"),
+    ],
+)
+async def test_decodes_ends_with_not_responding_when_the_connection_ends(connect, end) -> None:
+    """A subscriber learns that the scanner is gone instead of waiting forever."""
+    protocol = await connect(FakeScanner())
+    protocol.reconnect = False
+    iterator = protocol.decodes()
+    pending = asyncio.ensure_future(anext(iterator))
+    await settle()
+
+    end(protocol)
+
+    with pytest.raises(ScannerNotRespondingError, match="Start Real Mode"):
+        await asyncio.wait_for(pending, timeout=1)
+    await iterator.aclose()
+
+
+async def test_a_scan_ends_with_not_responding_when_the_connection_is_lost(connect) -> None:
+    """A scan waiting for a bar code reports the lost scanner rather than a missing bar code."""
+    protocol = await connect(FakeScanner({Opcode.START_DECODE: [ACK]}))
+    protocol.reconnect = False
+    scan = asyncio.create_task(protocol.scan(timeout=5))
+    await asyncio.sleep(0.1)
+
+    protocol.connection_lost(ConnectionError("cable unplugged"))
+
+    with pytest.raises(ScannerNotRespondingError):
+        await asyncio.wait_for(scan, timeout=1)
 
 
 # - Unsolicited packets ---------------------------------------------------------------------------------------------

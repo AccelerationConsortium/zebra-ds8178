@@ -5,6 +5,7 @@ import dataclasses
 import datetime
 
 import serial.tools.list_ports
+import typing_extensions as typing
 
 from unitelabs.bus import CommandExecutionError, Protocol, TransportFactory, create_serial_connection
 
@@ -72,7 +73,7 @@ class ZebraDs8178Protocol(Protocol):
         self._stale_buffer: asyncio.TimerHandle | None = None
         self._unsolicited: list[Packet] = []
         self._previous_unsolicited: Packet | None = None
-        self._listeners: set[asyncio.Queue[Packet]] = set()
+        self._listeners: set[asyncio.Queue[Packet | None]] = set()
         self._scanning_enabled = True
         self._scan_lock = asyncio.Lock()
         self._stop_requested = asyncio.Event()
@@ -124,6 +125,35 @@ class ZebraDs8178Protocol(Protocol):
             await asyncio.sleep(0.005)
         self.close()
 
+    @typing.override
+    async def open(self, validation_timeout: float = OPEN_TIMEOUT, **validation_kwargs) -> None:
+        """
+        Open the transport and wait until the scanner passes `identity`, for at most `OPEN_TIMEOUT`.
+
+        The bus also calls this to reconnect after a lost connection. A port that never opens, or a scanner that never
+        answers, does not raise on its own, so without the bound the connection attempt would wait forever. On a
+        timeout the transport is closed, so later requests report that there is no open connection.
+
+        Raises:
+          TimeoutError: If the port does not open or the scanner does not answer in time.
+        """
+        try:
+            await asyncio.wait_for(super().open(validation_timeout, **validation_kwargs), timeout=OPEN_TIMEOUT)
+        except (TimeoutError, asyncio.TimeoutError) as error:  # separate classes before Python 3.11
+            self.close()
+            msg = f"The scanner did not answer within {OPEN_TIMEOUT:g} s of opening the connection."
+            raise TimeoutError(msg) from error
+        except BaseException:
+            self.close()
+            raise
+
+    @typing.override
+    def connection_lost(self, exc: Exception | None = None) -> None:
+        """End every `listen` subscription as well: nothing more can arrive on a closed or lost connection."""
+        super().connection_lost(exc)
+        for listener in self._listeners:
+            listener.put_nowait(None)
+
     async def identity(self, **_kwargs) -> bool:
         """
         Confirm an SSI scanner answers, then set packeted decode data and enable scanning; runs on every (re)connect.
@@ -141,7 +171,7 @@ class ZebraDs8178Protocol(Protocol):
             await self.scan_enable()
         except (ScannerNotRespondingError, CommandRejectedError, UnexpectedResponseError):
             self.logger.warning("Scanner did not complete the connection checks.", exc_info=True)
-            return False  # `Protocol.validate` keeps waiting, bounded by `_reopen`
+            return False  # `Protocol.validate` keeps waiting, bounded by `open`
 
         return True
 
@@ -186,9 +216,13 @@ class ZebraDs8178Protocol(Protocol):
         raise ScannerNotRespondingError(msg)
 
     @contextlib.contextmanager
-    def listen(self) -> collections.abc.Generator[asyncio.Queue[Packet], None, None]:
-        """Receive every unsolicited message, e.g. decode data or an event, that arrives while the context is open."""
-        queue: asyncio.Queue[Packet] = asyncio.Queue()
+    def listen(self) -> collections.abc.Generator[asyncio.Queue[Packet | None], None, None]:
+        """
+        Receive every unsolicited message, e.g. decode data or an event, that arrives while the context is open.
+
+        `None` is queued when the connection closes or is lost; a listener then has to subscribe again once it is back.
+        """
+        queue: asyncio.Queue[Packet | None] = asyncio.Queue()
         self._listeners.add(queue)
         try:
             yield queue
@@ -299,7 +333,12 @@ class ZebraDs8178Protocol(Protocol):
                 pass  # held by the scan until it has stopped the decode session
 
     async def decodes(self) -> collections.abc.AsyncIterator[Barcode]:
-        """Yield every bar code the scanner decodes from now on, by trigger pull, presentation or `scan`."""
+        """
+        Yield every bar code the scanner decodes from now on, by trigger pull, presentation or `scan`.
+
+        Raises:
+          ScannerNotRespondingError: If the connection to the scanner closes or is lost.
+        """
         with self.listen() as messages:
             while True:
                 yield await self._next_decode(messages)
@@ -552,10 +591,17 @@ class ZebraDs8178Protocol(Protocol):
         return value
 
     @staticmethod
-    async def _next_decode(messages: asyncio.Queue[Packet]) -> Barcode:
-        """Wait for the next decode data among the unsolicited messages, skipping events."""
-        while (message := await messages.get()).opcode != Opcode.DECODE_DATA:
-            pass
+    async def _next_decode(messages: asyncio.Queue[Packet | None]) -> Barcode:
+        """
+        Wait for the next decode data among the unsolicited messages, skipping events.
+
+        Raises:
+          ScannerNotRespondingError: If the connection closes or is lost first.
+        """
+        while (message := await messages.get()) is None or message.opcode != Opcode.DECODE_DATA:
+            if message is None:
+                msg = "The connection to the scanner was closed or lost; use Start Real Mode to reconnect."
+                raise ScannerNotRespondingError(msg)
         return parse_decode_data(message.data)
 
     async def _stop_decode_quietly(self) -> None:
@@ -576,7 +622,7 @@ class ZebraDs8178Protocol(Protocol):
 
     async def _reopen(self, transport_factory: TransportFactory, transport_kwargs: dict) -> None:
         """
-        Replace the current transport, bounded in time because a port that never opens does not raise.
+        Replace the current transport.
 
         A scan in progress is checked before anything is closed, so a refused switch leaves the connection as it was.
 
@@ -589,11 +635,7 @@ class ZebraDs8178Protocol(Protocol):
         self._rsm_ready = False
         self._transport_factory = transport_factory
         self._transport_kwargs = transport_kwargs
-        try:
-            await asyncio.wait_for(self.open(validation_timeout=OPEN_TIMEOUT), timeout=OPEN_TIMEOUT)
-        except BaseException:
-            self.close()
-            raise
+        await self.open()
 
     def _check_not_scanning(self) -> None:
         """Refuse to replace the connection while a scan runs on it, before anything is looked up or closed."""

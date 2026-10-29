@@ -52,9 +52,13 @@ class BarcodeReaderController(sila.Feature):
         """
         await self.protocol.stop_scan()
 
-    @sila.ObservableProperty()
+    @sila.ObservableProperty(errors=[ScannerNotRespondingError])
     async def subscribe_scanned_barcode(self) -> sila.Stream[Barcode]:
-        """Each bar code the scanner reads from now on, by Scan or by pulling the trigger; earlier ones are not sent."""
+        """
+        Each bar code the scanner reads from now on, by Scan or by pulling the trigger; earlier ones are not sent.
+
+        The subscription ends when the connection to the scanner is lost or the mode is switched; subscribe again.
+        """
         async for decoded in self.protocol.decodes():
             yield decoded
 

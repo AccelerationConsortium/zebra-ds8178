@@ -9,11 +9,11 @@
       "package_name": "zebra_ds8178",
       "__package_import_name": "unitelabs.zebra_ds8178",
       "__protocol_name": "ZebraDs8178",
-      "project_description": "A SiLA2 connector for the Zebra DS8178 Digital Scanner",
+      "project_description": "A SiLA 2 connector for the Zebra DS8178 cordless 1D/2D barcode scanner and its cradle.",
       "author_full_name": "Acceleration Consortium",
       "author_email": "developers@accelerationconsortium.ca",
       "project_repo": "https://github.com/AccelerationConsortium/zebra-ds8178",
-      "communication_type": "usb",
+      "communication_type": "serial",
       "env": "uv",
       "_render_devdocs": false,
       "_jinja2_env_vars": {

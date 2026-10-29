@@ -8,6 +8,7 @@ from unitelabs.zebra_ds8178.features import BarcodeReaderController
 from unitelabs.zebra_ds8178.io import (
     Barcode,
     NoBarcodeDecodedError,
+    ScannerNotRespondingError,
     ScanningDisabledError,
     ScanStoppedError,
     SimulatedScanner,
@@ -71,6 +72,34 @@ async def test_scanned_barcode_streams_bar_codes_read_after_subscribing(simulate
         await stream.aclose()
 
 
+async def test_scanned_barcode_ends_with_not_responding_when_the_scanner_is_gone(simulated) -> None:
+    """A subscriber learns that the connection ended instead of waiting forever."""
+    protocol = await simulated()
+    stream = BarcodeReaderController(protocol).subscribe_scanned_barcode()
+    received = asyncio.ensure_future(anext(stream))
+    await asyncio.sleep(0)
+    try:
+        protocol.close()
+
+        with pytest.raises(ScannerNotRespondingError):
+            await asyncio.wait_for(received, timeout=1)
+    finally:
+        await stream.aclose()
+
+
+async def test_unsubscribing_cancels_the_stream(simulated) -> None:
+    """What the SiLA server does when a client unsubscribes: cancel the pending read and await it."""
+    stream = BarcodeReaderController(await simulated()).subscribe_scanned_barcode()
+    try:
+        pending = asyncio.ensure_future(anext(stream))
+        await asyncio.sleep(0)
+        pending.cancel()
+        with pytest.raises(asyncio.CancelledError):  # a StopAsyncIteration here makes gRPC log ExecuteBatchError
+            await pending
+    finally:
+        await stream.aclose()
+
+
 async def test_aiming_starts_and_stops(simulated) -> None:
     """Both commands complete on an acknowledging scanner."""
     controller = BarcodeReaderController(await simulated())
@@ -91,7 +120,7 @@ def test_scan_timeout_is_limited_to_the_scanners_session_in_seconds(registered) 
 
 
 def test_endpoints_declare_the_errors_a_client_can_react_to(registered) -> None:
-    """Only the errors each endpoint can raise are declared; the local state and stream declare none."""
+    """Only the errors each endpoint can raise are declared; the locally held state declares none."""
     controller = registered(BarcodeReaderController)
 
     assert sorted(controller.commands["Scan"].errors) == [
@@ -105,4 +134,4 @@ def test_endpoints_declare_the_errors_a_client_can_react_to(registered) -> None:
     for name in ("SetScanningEnabled", "StartAiming", "StopAiming"):
         assert list(controller.commands[name].errors) == ["ScannerNotRespondingError"]
     assert not controller.properties["ScanningEnabled"].errors
-    assert not controller.properties["ScannedBarcode"].errors
+    assert list(controller.properties["ScannedBarcode"].errors) == ["ScannerNotRespondingError"]
