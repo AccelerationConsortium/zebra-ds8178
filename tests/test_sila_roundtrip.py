@@ -69,7 +69,7 @@ async def test_stop_scan_ends_a_running_scan_with_the_defined_error(serve, monke
 
         await client.get_unobservable_command(f"{BARCODE_READER}/Command/StopScan").execute({})
 
-        with pytest.raises(Exception, match="stopped with Stop Scan") as error:
+        with pytest.raises(Exception, match="stopped with `BarcodeReaderController.StopScan`") as error:
             await asyncio.wait_for(wait_for_responses(execution), timeout=3)
     assert type(error.value).__name__ == "ScanStoppedError"
 

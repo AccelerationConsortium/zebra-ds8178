@@ -75,6 +75,7 @@ class ZebraDs8178Protocol(Protocol):
         self._previous_unsolicited: Packet | None = None
         self._listeners: set[asyncio.Queue[Packet | None]] = set()
         self._scanning_enabled = True
+        self._disabling_again: asyncio.Task | None = None
         self._scan_lock = asyncio.Lock()
         self._stop_requested = asyncio.Event()
         self._rsm_ready = False
@@ -197,7 +198,10 @@ class ZebraDs8178Protocol(Protocol):
             except TimeoutError:
                 continue
             except CommandExecutionError as error:
-                msg = f"There is no open connection to the scanner ({error}); use Start Real Mode to reconnect."
+                msg = (
+                    f"There is no open connection to the scanner ({error}); call "
+                    "`SimulationController.StartRealMode` to reconnect."
+                )
                 raise ScannerNotRespondingError(msg) from error
 
             if response.opcode == Opcode.CMD_NAK:
@@ -234,6 +238,19 @@ class ZebraDs8178Protocol(Protocol):
         """Whether the scanner accepts trigger pulls and scan requests, as last set by `scan_enable`/`scan_disable`."""
         return self._scanning_enabled
 
+    async def set_scanning_enabled(self, enabled: bool) -> None:
+        """
+        Enable or disable scanning by trigger and by request; see `scan_enable` and `scan_disable`.
+
+        Raises:
+          ScannerNotRespondingError: If the scanner does not answer.
+          CommandRejectedError: If the scanner refuses the request.
+        """
+        if enabled:
+            await self.scan_enable()
+        else:
+            await self.scan_disable()
+
     async def scan_enable(self) -> None:
         """
         Permit scanning by trigger and by request (SCAN_ENABLE, SSI guide p. 2-62).
@@ -249,7 +266,9 @@ class ZebraDs8178Protocol(Protocol):
         """
         Make the scanner ignore the trigger and scan requests (SCAN_DISABLE, SSI guide p. 2-61).
 
-        Scanning stays disabled until `scan_enable`, a reconnect, or the scanner powering up again.
+        Scanning stays disabled until `scan_enable`, a reconnect, or the scanner powering up again. The scanner cannot
+        be asked whether it is disabled, so a power-up is noticed only by the next bar code it reads, after which
+        scanning is disabled again.
 
         Raises:
           ScannerNotRespondingError: If the scanner does not answer.
@@ -316,7 +335,7 @@ class ZebraDs8178Protocol(Protocol):
                     return decode.result()
                 await self._stop_decode_quietly()
                 if stop in done:
-                    msg = "The scan was stopped with Stop Scan before a bar code was read."
+                    msg = "The scan was stopped with `BarcodeReaderController.StopScan` before a bar code was read."
                     raise ScanStoppedError(msg)
                 msg = f"No bar code was decoded within {timeout:g} s."
                 raise NoBarcodeDecodedError(msg)
@@ -557,7 +576,8 @@ class ZebraDs8178Protocol(Protocol):
         Every packet is ACKed, not only the last one of a multipacket message: under Multipacket Option 1, the
         default, the scanner waits for an ACK per packet, and under Options 2 and 3 the extra ACKs are ignored as
         unsolicited (SSI guide pp. 1-7 and 1-10). A resend of the previous packet, caused by an ACK that did not
-        arrive in time, is acknowledged again but not delivered twice.
+        arrive in time, is acknowledged again but not delivered twice. Decode data while scanning is disabled means
+        the scanner powered up and forgot SCAN_DISABLE; it is delivered, and scanning is disabled again.
         """
         self._send(Packet(Opcode.CMD_ACK))
 
@@ -573,6 +593,10 @@ class ZebraDs8178Protocol(Protocol):
         message, self._unsolicited = join_message(self._unsolicited), []
         for listener in self._listeners:
             listener.put_nowait(message)
+
+        if message.opcode == Opcode.DECODE_DATA and not self._scanning_enabled and not self._disabling_again:
+            self.logger.warning("The scanner read a bar code while scanning is disabled; disabling it again.")
+            self._disabling_again = asyncio.ensure_future(self._disable_scanning_again())
 
     async def _get_byte_parameter(self, number: int) -> int:
         value = (await self.get_parameters(number)).get(number)
@@ -600,9 +624,21 @@ class ZebraDs8178Protocol(Protocol):
         """
         while (message := await messages.get()) is None or message.opcode != Opcode.DECODE_DATA:
             if message is None:
-                msg = "The connection to the scanner was closed or lost; use Start Real Mode to reconnect."
+                msg = (
+                    "The connection to the scanner was closed or lost; call `SimulationController.StartRealMode` to "
+                    "reconnect."
+                )
                 raise ScannerNotRespondingError(msg)
         return parse_decode_data(message.data)
+
+    async def _disable_scanning_again(self) -> None:
+        """Send SCAN_DISABLE again in the background, where a failure can only be logged."""
+        try:
+            await self.scan_disable()
+        except (ScannerNotRespondingError, CommandRejectedError, UnexpectedResponseError):
+            self.logger.warning("Could not disable scanning again.", exc_info=True)
+        finally:
+            self._disabling_again = None
 
     async def _stop_decode_quietly(self) -> None:
         """Stop a session that is ending anyway; a failure here must not hide the error that ended it."""

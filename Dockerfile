@@ -34,4 +34,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Reset the entrypoint, don't invoke `uv`
 ENTRYPOINT []
 
-CMD [ "connector", "start", "--app", "unitelabs.zebra_ds8178:create_app", "-vvv" ]
+CMD [ "connector", "start", "--app", "unitelabs.zebra_ds8178:create_app" ]

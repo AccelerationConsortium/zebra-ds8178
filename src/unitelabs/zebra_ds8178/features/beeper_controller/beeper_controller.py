@@ -8,11 +8,12 @@ class BeeperController(sila.Feature):
     """
     Controls the beeper of the Zebra DS8178 scanner.
 
-    Beep sounds a pattern, e.g. to signal an operator where to scan next. In an automated workflow, Set Beep After
-    Scan turns off the beep after each bar code read while errors are still heard, and Set Tone to off silences the
-    beep after reads too; Beep and the beep when the scanner loses its cradle are still heard either way. Changing
-    either setting does not itself beep. Both settings last until the scanner is switched off or its battery runs
-    out; restarting the connector does not reset them.
+    `BeeperController.Beep` sounds a pattern, e.g. to signal an operator where to scan next. In an automated
+    workflow, `BeeperController.SetBeepAfterScan` turns off the beep after each bar code read while errors are still
+    heard, and `BeeperController.SetTone` to off silences the beep after reads too; `BeeperController.Beep` and the
+    beep when the scanner loses its cradle are still heard either way. Changing either setting does not itself beep.
+    Both settings last until the scanner is switched off or its battery runs out; restarting the connector does not
+    reset them.
     """
 
     def __init__(self, protocol: ZebraDs8178Protocol):
@@ -57,7 +58,8 @@ class BeeperController(sila.Feature):
         """
         Set the pitch of the scanner's beeps, or silence them.
 
-        Off silences the beep after each read; Beep and the beep when the scanner loses its cradle are still heard.
+        Off silences the beep after each read; `BeeperController.Beep` and the beep when the scanner loses its cradle
+        are still heard.
         The setting lasts until the scanner is switched off or its battery runs out; it then returns to the tone stored
         on the scanner, medium by default.
 

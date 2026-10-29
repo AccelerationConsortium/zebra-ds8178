@@ -287,7 +287,7 @@ async def test_a_closed_connection_is_not_responding(connect) -> None:
     protocol.close()
     await settle()
 
-    with pytest.raises(ScannerNotRespondingError, match="Start Real Mode"):
+    with pytest.raises(ScannerNotRespondingError, match="StartRealMode"):
         await protocol.get_revision()
 
 
@@ -329,6 +329,33 @@ async def test_scanning_state_follows_enable_and_disable(connect) -> None:
     with pytest.raises(CommandRejectedError):
         await protocol.scan_disable()
     assert protocol.scanning_enabled
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_set_scanning_enabled_sends_enable_or_disable(connect, enabled: bool) -> None:
+    scanner = FakeScanner({Opcode.SCAN_DISABLE: [ACK]})
+    protocol = await connect(scanner)
+
+    await protocol.set_scanning_enabled(enabled)
+
+    assert scanner.opcodes() == [Opcode.SCAN_ENABLE if enabled else Opcode.SCAN_DISABLE]
+    assert protocol.scanning_enabled is enabled
+
+
+async def test_a_read_while_disabled_disables_the_restarted_scanner_again(connect) -> None:
+    """A scanner that powered up has forgotten SCAN_DISABLE; its first read is delivered and it is disabled again."""
+    scanner = FakeScanner({Opcode.SCAN_DISABLE: [ACK]})
+    protocol = await connect(scanner)
+    await protocol.scan_disable()
+    scanner.received.clear()
+
+    with protocol.listen() as messages:
+        protocol.data_received(UPC_E)
+        await asyncio.sleep(0.1)
+
+        assert (await messages.get()).opcode == Opcode.DECODE_DATA
+    assert scanner.opcodes() == [Opcode.CMD_ACK, Opcode.SCAN_DISABLE]
+    assert protocol.scanning_enabled is False
 
 
 async def test_a_refused_aim_is_reported(connect) -> None:
@@ -535,7 +562,7 @@ async def test_decodes_ends_with_not_responding_when_the_connection_ends(connect
 
     end(protocol)
 
-    with pytest.raises(ScannerNotRespondingError, match="Start Real Mode"):
+    with pytest.raises(ScannerNotRespondingError, match="StartRealMode"):
         await asyncio.wait_for(pending, timeout=1)
     await iterator.aclose()
 

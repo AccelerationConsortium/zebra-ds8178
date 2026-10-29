@@ -1,9 +1,9 @@
 import dataclasses
-from importlib.metadata import version
+import importlib.metadata
 
 from unitelabs.cdk import ConnectorBaseConfig, SiLAServerConfig
 
-__version__ = version("unitelabs-zebra-ds8178")
+__version__ = importlib.metadata.version("unitelabs-zebra-ds8178")
 
 
 @dataclasses.dataclass

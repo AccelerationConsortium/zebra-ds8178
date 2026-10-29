@@ -177,16 +177,19 @@ After installation, you can verify that everything works by starting the connect
 Note: This must be done in the activated environment setup in Step 1.
 
 ```sh
-connector start --app unitelabs.zebra_ds8178:create_app -vvv
+connector start --app unitelabs.zebra_ds8178:create_app
 ```
 
 If you decided to create your configuration file at a non-default location, you can specify it with the `--config-path` or `-cfg` argument:
 
 ```sh
-connector start --app unitelabs.zebra_ds8178:create_app -cfg <path to config> -vvv
+connector start --app unitelabs.zebra_ds8178:create_app -cfg <path to config>
 ```
 
 In this way one can have multiple configurations for the same connector.
+
+To change how much the connector logs, set the levels under `logging` in the configuration file (see
+`config schema`); the `-v` flags of earlier versions are deprecated.
 
 ## Usage
 
@@ -227,7 +230,7 @@ If you choose not to update your config file with the paths to your certificates
 With your updated config file you can once again run:
 
 ```sh
-connector start --app unitelabs.zebra_ds8178:create_app -vvv
+connector start --app unitelabs.zebra_ds8178:create_app
 ```
 
 > **Important:** Never share the `key.pem` file with anyone. Only the `cert.pem` is required for clients to connect to encrypted servers.
@@ -281,7 +284,7 @@ Set up the development environment and start the connector:
 
 ```sh
 uv sync --all-extras
-uv run connector start -vvv
+uv run connector start
 ```
 
 Note: By default, uv will sync all dependencies with every call to `uv run CMD`. To prevent this use `uv run --frozen CMD` or set the environment variable `UV_FROZEN=true`.

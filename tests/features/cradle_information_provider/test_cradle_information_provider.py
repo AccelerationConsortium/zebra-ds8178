@@ -24,7 +24,7 @@ async def test_a_lost_connection_is_reported_as_not_responding(simulated) -> Non
     provider = CradleInformationProvider(protocol)
     await protocol.aclose()
 
-    with pytest.raises(ScannerNotRespondingError, match="Start Real Mode"):
+    with pytest.raises(ScannerNotRespondingError, match="StartRealMode"):
         await provider.get_model()
 
 

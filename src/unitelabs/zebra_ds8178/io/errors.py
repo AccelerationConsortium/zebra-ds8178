@@ -21,8 +21,8 @@ class ScannerNotRespondingError(Exception):
     The scanner did not answer, or the connector has no open connection to it.
 
     Place the scanner in its cradle or within Bluetooth range and pull the trigger to wake it if it stopped trying to
-    reconnect; re-pair it by scanning the bar code on the cradle if needed. After a lost connection, use Start Real
-    Mode to reconnect.
+    reconnect; re-pair it by scanning the bar code on the cradle if needed. After a lost connection, call
+    `SimulationController.StartRealMode` to reconnect.
     """
 
 
@@ -72,7 +72,7 @@ class NoBarcodeDecodedError(Exception):
 
 class ScanStoppedError(Exception):
     """
-    The scan was stopped with Stop Scan before a bar code was read.
+    The scan was stopped with `BarcodeReaderController.StopScan` before a bar code was read.
 
     Start a new scan when the bar code is in front of the scanner.
     """

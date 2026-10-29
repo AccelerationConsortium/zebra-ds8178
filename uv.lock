@@ -2266,6 +2266,7 @@ name = "unitelabs-zebra-ds8178"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "typing-extensions" },
     { name = "unitelabs-bus", extra = ["serial"] },
     { name = "unitelabs-cdk" },
 ]
@@ -2292,6 +2293,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
     { name = "ruff", marker = "extra == 'dev'" },
+    { name = "typing-extensions", specifier = "~=4.4" },
     { name = "unitelabs-bus", extras = ["serial"], specifier = "~=0.8", index = "https://gitlab.com/api/v4/groups/1009252/-/packages/pypi/simple" },
     { name = "unitelabs-cdk", specifier = "~=0.16" },
     { name = "unitelabs-cdk", extras = ["dev"], marker = "extra == 'dev'" },

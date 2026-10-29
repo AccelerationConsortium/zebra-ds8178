@@ -18,9 +18,10 @@ class BarcodeReaderController(sila.Feature):
     """
     Reads bar codes with the Zebra DS8178 scanner.
 
-    Scan starts a read as if the trigger were pulled and returns the first bar code decoded. Every bar code read, by
-    Scan or by pulling the trigger, is also sent to subscribers of Scanned Barcode. The scanner talks to the connector
-    through its cradle over Bluetooth, so it must be paired to the cradle and within range.
+    `BarcodeReaderController.Scan` starts a read as if the trigger were pulled and returns the first bar code
+    decoded. Every bar code read, by `BarcodeReaderController.Scan` or by pulling the trigger, is also sent to
+    subscribers of `BarcodeReaderController.ScannedBarcode`. The scanner talks to the connector through its cradle
+    over Bluetooth, so it must be paired to the cradle and within range.
     """
 
     def __init__(self, protocol: ZebraDs8178Protocol):
@@ -33,7 +34,7 @@ class BarcodeReaderController(sila.Feature):
         Read one bar code, as if the trigger were pulled, and return it.
 
         The scanner reads until it decodes a bar code or the timeout passes. A bar code read by pulling the trigger
-        during that time is returned as well. Stop Scan ends the read early.
+        during that time is returned as well. `BarcodeReaderController.StopScan` ends the read early.
 
         Args:
           Timeout: How long to try to read a bar code.
@@ -46,7 +47,7 @@ class BarcodeReaderController(sila.Feature):
     @sila.UnobservableCommand()
     async def stop_scan(self) -> None:
         """
-        Stop a running Scan, which then ends with ScanStoppedError; does nothing when no scan is running.
+        Stop a running `BarcodeReaderController.Scan`, which then ends with ScanStoppedError; does nothing otherwise.
 
         Returns once the scanner has stopped reading.
         """
@@ -55,7 +56,9 @@ class BarcodeReaderController(sila.Feature):
     @sila.ObservableProperty(errors=[ScannerNotRespondingError])
     async def subscribe_scanned_barcode(self) -> sila.Stream[Barcode]:
         """
-        Each bar code the scanner reads from now on, by Scan or by pulling the trigger; earlier ones are not sent.
+        Each bar code the scanner reads from now on, by `BarcodeReaderController.Scan` or by pulling the trigger.
+
+        Bar codes read before subscribing are not sent.
 
         The subscription ends when the connection to the scanner is lost or the mode is switched; subscribe again.
         """
@@ -64,27 +67,25 @@ class BarcodeReaderController(sila.Feature):
 
     @sila.UnobservableProperty()
     async def get_scanning_enabled(self) -> bool:
-        """Whether the scanner reads bar codes; while disabled, it ignores both the trigger and Scan."""
+        """Whether the scanner reads bar codes; while disabled, it ignores the trigger and Scan requests."""
         return self.protocol.scanning_enabled
 
     @sila.UnobservableCommand(errors=[ScannerNotRespondingError])
     async def set_scanning_enabled(self, enabled: bool) -> None:
         """
-        Enable or disable reading bar codes, by the trigger and by Scan.
+        Enable or disable reading bar codes, by the trigger and by `BarcodeReaderController.Scan`.
 
-        Scanning is enabled again whenever the connector connects to the scanner.
+        Scanning is enabled again whenever the connector connects to the scanner. A scanner that restarts while
+        disabled, e.g. after its battery ran out, reads one more bar code before the connector disables it again.
 
         Args:
           Enabled: Whether the scanner reads bar codes.
         """
-        if enabled:
-            await self.protocol.scan_enable()
-        else:
-            await self.protocol.scan_disable()
+        await self.protocol.set_scanning_enabled(enabled)
 
     @sila.UnobservableCommand(errors=[ScannerNotRespondingError])
     async def start_aiming(self) -> None:
-        """Project the scanner's red aiming pattern, e.g. to line a label up with it, until Stop Aiming is called."""
+        """Project the scanner's red aiming pattern, until `BarcodeReaderController.StopAiming`."""
         await self.protocol.aim_on()
 
     @sila.UnobservableCommand(errors=[ScannerNotRespondingError])

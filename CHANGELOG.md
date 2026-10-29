@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Barcode Reader Controller: `Scan` reads one bar code, as if the trigger were pulled, and returns its symbology
   and data (timeout 0.5 to 9.9 s), and `StopScan` ends a running scan early. `ScannedBarcode` streams every bar
   code read, including trigger pulls, and ends with `ScannerNotRespondingError` when the connection to the scanner
-  is lost or the mode is switched. `SetScanningEnabled` and `ScanningEnabled` turn scanning off and on, and
+  is lost or the mode is switched. `SetScanningEnabled` and `ScanningEnabled` turn scanning off and on; a scanner
+  that restarts while disabled reads one bar code, after which the connector disables it again.
   `StartAiming` and `StopAiming` switch the red aiming pattern.
 - Beeper Controller: `Beep` sounds any of the scanner's 30 beep patterns. `SetBeepAfterScan` turns off the beep
   after each read while error beeps still sound, and `SetTone` sets the pitch or silences the beep after reads

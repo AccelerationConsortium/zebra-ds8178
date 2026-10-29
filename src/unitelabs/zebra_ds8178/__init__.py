@@ -1,5 +1,5 @@
 import collections.abc
-from importlib.metadata import version
+import importlib.metadata
 
 from unitelabs.cdk import Connector
 from unitelabs.cdk.features.core.lock_controller import LockController
@@ -8,7 +8,7 @@ from .config import ZebraDs8178Config
 from .features import BarcodeReaderController, BeeperController, CradleInformationProvider, SimulationController
 from .io import ZebraDs8178Protocol
 
-__version__ = version("unitelabs-zebra-ds8178")
+__version__ = importlib.metadata.version("unitelabs-zebra-ds8178")
 
 
 async def create_app(config: ZebraDs8178Config) -> collections.abc.AsyncGenerator[Connector, None]:
